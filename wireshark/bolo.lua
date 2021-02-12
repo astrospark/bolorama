@@ -104,6 +104,7 @@ bolo_protocol.experts = { unknown_opcode_expert }
 
 local operand_count =
 {
+	[0x02] = 10,
 	[0x04] = 5,
 	[0x06] = 7,
 	[0x21] = 3,
@@ -122,11 +123,14 @@ local operand_count =
 	[0x94] = 3,
 	[0x95] = 3,
 	[0x99] = 4,
+	[0x9f] = 32,
+	[0xa2] = 3,
 	[0xaf] = 3,
 	[0xb7] = 3,
 	[0xc9] = 3,
 	[0xd7] = 3,
 	[0xde] = 3,
+	[0xf3] = 44,
 	[0xf8] = 36, -- user name
 	[0xfa] = 38 -- message
 }

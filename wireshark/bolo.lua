@@ -99,6 +99,9 @@ bolo_protocol.fields = {
 	has_password_field
 }
 
+unknown_opcode_expert = ProtoExpert.new("bolo.unknown_opcode.expert", "Unknown opcode", expert.group.UNDECODED, expert.severity.WARN)
+bolo_protocol.experts = { unknown_opcode_expert }
+
 local operand_count =
 {
 	[0x04] = 5,
@@ -302,6 +305,7 @@ function dissect_game_state(buffer, tree)
 		if (dissected == 0) then
 			local count = operand_count[opcode]
 			if count == nil then
+				t:add_proto_expert_info(unknown_opcode_expert)
 				t:add(unknown_field, buffer(pos))
 				return
 			end

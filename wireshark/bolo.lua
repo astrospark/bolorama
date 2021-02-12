@@ -69,7 +69,7 @@ bolo_protocol.fields = {
 
 	signature_field, version_field, packet_type_field,
 
-	-- Packet Type 0x02
+	-- Packet Type 0x02 Game State
 	sequence_field, opcode_field, subcode_field,
 	host_address_field,
 	map_pillbox_count_field, map_pillbox_data_field,
@@ -154,8 +154,8 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 		t1:add(unknown_field, buffer(pos))
 	end
 
-	if packet_type == 0x02 then -- Game State Data?
-		dissect_type_02(buffer(8), tree)
+	if packet_type == 0x02 then -- Game State
+		dissect_game_state(buffer(8), tree)
 	end
 
 	if packet_type == 0x03 then
@@ -274,16 +274,17 @@ end
 function get_packet_type_name(packet_type)
 	local packet_type_name = "UNKNOWN"
 
-	if packet_type == 0x08 then packet_type_name = "Password"
-		elseif packet_type == 0x0d then packet_type_name = "Request Game Info"
-		elseif packet_type == 0x0e then packet_type_name = "Game Info" end
+	if packet_type == 0x02 then packet_type_name = "Game State"
+	elseif packet_type == 0x08 then packet_type_name = "Password"
+	elseif packet_type == 0x0d then packet_type_name = "Request Game Info"
+	elseif packet_type == 0x0e then packet_type_name = "Game Info" end
 
 	return packet_type_name
 end
 
-function dissect_type_02(buffer, tree)
+function dissect_game_state(buffer, tree)
 	local pos = 0
-	local t = tree:add(bolo_protocol, buffer(pos), "Bolo Packet Type 0x02")
+	local t = tree:add(bolo_protocol, buffer(pos), "Bolo Game State")
 
 	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 

@@ -20,6 +20,10 @@ subcode_field = ProtoField.uint8("bolo.subcode", "subcode", base.HEX)
 
 host_address_field = ProtoField.ipv4("bolo.host_address", "host_address")
 
+-- Op Code 0xfa
+message_length_field = ProtoField.uint8("bolo.message_length", "message_length", base.DEC)
+message_field = ProtoField.string("bolo.message", "message", base.ASCII)
+
 map_pillbox_count_field = ProtoField.uint8("bolo.map_pillbox_count", "map_pillbox_count", base.DEC)
 map_pillbox_data_field = ProtoField.bytes("bolo.map_pillbox_data", "map_pillbox_data", base.SPACE)
 map_base_count_field = ProtoField.uint8("bolo.map_base_count", "map_base_count", base.DEC)
@@ -72,6 +76,7 @@ bolo_protocol.fields = {
 	-- Packet Type 0x02 Game State
 	sequence_field, opcode_field, subcode_field,
 	host_address_field,
+	message_length_field, message_field,
 	map_pillbox_count_field, map_pillbox_data_field,
 	map_base_count_field, map_base_data_field,
 	map_start_count_field, map_start_data_field,
@@ -401,6 +406,16 @@ function dissect_opcode(opcode, buffer, tree)
 		user_name_length = buffer(pos, 1):uint()
 		t:add(user_name_length_field, buffer(pos, 1)); pos = pos + 1
 		t:add(user_name_field, buffer(pos, user_name_length)); pos = pos + user_name_length
+	elseif opcode == 0xfa then -- message
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+
+		message_length = buffer(pos, 1):uint()
+		t:add(message_length_field, buffer(pos, 1)); pos = pos + 1
+		t:add(message_field, buffer(pos, message_length)); pos = pos + message_length
+
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 	end
 
 	return pos

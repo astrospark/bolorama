@@ -265,11 +265,13 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 		te:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
 		te:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
 
-		local start_delay = (buffer(pos, 4):le_uint() / 50) + 1
+		local start_delay = buffer(pos, 4):le_uint()
+		if start_delay ~= 0 then start_delay = (start_delay / 50) + 1 end
 		te:add(start_delay_field, buffer(pos, 4), start_delay); pos = pos + 4
 
-		local time_limit = (buffer(pos, 4):le_uint() / 50 / 60) + 1
-		te:add(time_limit_field, time_limit); pos = pos + 4
+		local time_limit = buffer(pos, 4):le_uint()
+		if time_limit ~= 0 then time_limit = (time_limit / 50 / 60) + 1 end
+		te:add(time_limit_field, buffer(pos, 4), time_limit); pos = pos + 4
 
 		te:add_le(num_players_field, buffer(pos, 2)); pos = pos + 2
 		te:add_le(free_pills_field, buffer(pos, 2)); pos = pos + 2

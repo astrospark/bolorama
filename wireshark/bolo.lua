@@ -327,14 +327,12 @@ function dissect_opcode(opcode, buffer, tree)
 			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
 
 			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		end
-		if subcode == 0x02 then
+		elseif subcode == 0x02 then
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
 
 			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		end
-		if subcode == 0x06 then -- disconnect
+		elseif subcode == 0x06 then -- disconnect
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
 
@@ -345,8 +343,7 @@ function dissect_opcode(opcode, buffer, tree)
 
 			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 		end
-	end
-	if opcode == 0xf1 then
+	elseif opcode == 0xf1 then
 		local subcode = buffer(pos + 1, 1):uint()
 		if subcode == 0x01 then
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1

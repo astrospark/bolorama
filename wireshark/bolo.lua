@@ -18,6 +18,8 @@ sequence_field = ProtoField.uint8("bolo.sequence", "sequence", base.HEX)
 opcode_field = ProtoField.uint8("bolo.opcode", "opcode", base.HEX)
 subcode_field = ProtoField.uint8("bolo.subcode", "subcode", base.HEX)
 
+host_address_field = ProtoField.ipv4("bolo.host_address", "host_address")
+
 map_pillbox_count_field = ProtoField.uint8("bolo.map_pillbox_count", "map_pillbox_count", base.DEC)
 map_pillbox_data_field = ProtoField.bytes("bolo.map_pillbox_data", "map_pillbox_data", base.SPACE)
 map_base_count_field = ProtoField.uint8("bolo.map_base_count", "map_base_count", base.DEC)
@@ -69,6 +71,7 @@ bolo_protocol.fields = {
 
 	-- Packet Type 0x02
 	sequence_field, opcode_field, subcode_field,
+	host_address_field,
 	map_pillbox_count_field, map_pillbox_data_field,
 	map_base_count_field, map_base_data_field,
 	map_start_count_field, map_start_data_field,
@@ -115,7 +118,6 @@ local operand_count =
 	[0xb7] = 3,
 	[0xc9] = 3,
 	[0xd7] = 3,
-	[0xdc] = 49,
 	[0xde] = 3,
 	[0xf8] = 36, -- user name
 	[0xfa] = 38 -- message
@@ -154,45 +156,6 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 
 	if packet_type == 0x02 then -- Game State Data?
 		dissect_type_02(buffer(8), tree)
-
-		-- local t2 = tree:add(bolo_protocol, buffer(8), "Bolo Packet Type 0x02")
-		-- local pos = 8
-
-		-- t2:add(sequence_field, buffer(pos, 1)); pos = pos + 1
-
-		-- t2:add(unknown_field, buffer(pos, 6)); pos = pos + 6
-
-		-- user_name_length = buffer(pos, 1):uint()
-		-- t2:add(user_name_length_field, buffer(pos, 1)); pos = pos + 1
-
-		-- local user_name_end = pos + user_name_length
-		-- local padding_length = 35 - user_name_length
-		-- t2:add(user_name_field, buffer(pos, user_name_length))
-		-- if padding_length > 0 then t2:add(padding_field, buffer(user_name_end, padding_length)); end
-		-- pos = pos + 35
-
-		-- local map_name_length = buffer(pos, 1):uint()
-		-- t2:add(map_name_length_field, buffer(pos, 1)); pos = pos + 1
-
-		-- local map_name_end = pos + map_name_length
-		-- padding_length = 35 - map_name_length
-		-- t2:add(map_name_field, buffer(pos, map_name_length))
-		-- if padding_length > 0 then t2:add(padding_field, buffer(map_name_end, padding_length)); end
-		-- pos = pos + 35
-
-		-- t2:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
-		-- t2:add_le(start_time_field, buffer(pos, 4)); pos = pos + 4
-		-- t2:add(game_type_field, buffer(pos, 1)); pos = pos + 1
-
-		-- local game_flags_tree = t2:add(game_flags_field, buffer(pos, 1));
-		-- game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
-
-		-- t2:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
-		-- t2:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
-		-- t2:add_le(start_delay_field, buffer(pos, 4)); pos = pos + 4
-		-- t2:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
-
-		-- t2:add(unknown_field, buffer(pos))
 	end
 
 	if packet_type == 0x03 then
@@ -384,7 +347,21 @@ function dissect_opcode(opcode, buffer, tree)
 			if padding_length > 0 then t:add(padding_field, buffer(map_name_end, padding_length)) end
 			pos = pos + 35
 
-			t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
+			t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
+
+			t:add_le(start_time_field, buffer(pos, 4)); pos = pos + 4
+			t:add(game_type_field, buffer(pos, 1)); pos = pos + 1
+
+			local game_flags_tree = t:add(game_flags_field, buffer(pos, 1));
+			game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
+
+			t:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
+			t:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
+			t:add_le(start_delay_field, buffer(pos, 4)); pos = pos + 4
+			t:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
+
+			t:add(unknown_field, buffer(pos, 32)); pos = pos + 32
+			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 		elseif subcode == 0x02 then
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1

@@ -373,6 +373,7 @@ function dissect_opcode(opcode, buffer, tree)
 			for x = 0, pillbox_count - 1 do
 				t:add(map_pillbox_data_field, buffer(pos, 5)); pos = pos + 5
 			end
+			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 		elseif subcode == 0x03 then
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1

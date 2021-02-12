@@ -105,7 +105,7 @@ bolo_protocol.experts = { unknown_opcode_expert }
 local operand_count =
 {
 	[0x04] = 5,
-	[0x06] = 3,
+	[0x06] = 7,
 	[0x21] = 3,
 	[0x24] = 3,
 	[0x25] = 3,
@@ -321,28 +321,15 @@ function dissect_opcode(opcode, buffer, tree)
 	local pos = 0
 
 	if opcode == 0xf0 then
-		local subcode = buffer(pos + 1, 1):uint()
-		if subcode == 0x01 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
 
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		elseif subcode == 0x02 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		elseif subcode == 0x06 then -- disconnect
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			for x = 0, 2 do
-				t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
-				t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
-			end
-
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		for x = 0, 2 do
+			t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
+			t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
 		end
+
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 	elseif opcode == 0xf1 then
 		local subcode = buffer(pos + 1, 1):uint()
 		if subcode == 0x01 then
@@ -410,6 +397,8 @@ function dissect_opcode(opcode, buffer, tree)
 		user_name_length = buffer(pos, 1):uint()
 		t:add(user_name_length_field, buffer(pos, 1)); pos = pos + 1
 		t:add(user_name_field, buffer(pos, user_name_length)); pos = pos + user_name_length
+
+		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
 	elseif opcode == 0xfa then -- message
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 

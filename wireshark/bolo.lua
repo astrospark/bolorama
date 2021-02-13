@@ -1,5 +1,7 @@
 bolo_protocol = Proto("Bolo",  "Bolo Protocol")
 
+------ Field Definitions ------
+
 local boolean_values =
 {
 	[0] = "False",
@@ -16,7 +18,7 @@ packet_type_field = ProtoField.string("bolo.packet_type", "Packet Type", base.AS
 
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
-state_block_field = ProtoField.uint8("bolo.state_block", "State Block", base.UNIT_STRING, {" byte", " bytes"})
+block_field = ProtoField.uint8("bolo.block", "Block", base.UNIT_STRING, {" byte", " bytes"})
 player_field = ProtoField.uint8("bolo.player", "Player", base.DEC)
 opcode_field = ProtoField.uint8("bolo.opcode", "Opcode", base.HEX)
 subcode_field = ProtoField.uint8("bolo.subcode", "Subcode", base.HEX)
@@ -78,7 +80,7 @@ bolo_protocol.fields = {
 	signature_field, version_field, packet_type_field,
 
 	-- Packet Type 0x02 Game State
-	sequence_field, state_block_field, player_field,
+	sequence_field, block_field, player_field,
 	opcode_field, subcode_field,
 	host_address_field,
 	message_length_field, message_field,
@@ -104,6 +106,8 @@ bolo_protocol.fields = {
 	has_password_field
 }
 
+------ Expert Definitions ------
+
 unknown_packet_type_expert = ProtoExpert.new("bolo.unknown_packet_type_expert.expert", "Unknown packet type", expert.group.UNDECODED, expert.severity.WARN)
 unknown_opcode_expert = ProtoExpert.new("bolo.unknown_opcode.expert", "Unknown opcode", expert.group.UNDECODED, expert.severity.WARN)
 invalid_string_length_expert = ProtoExpert.new("bolo.invalid_string_length.expert", "Invalid string length", expert.group.MALFORMED, expert.severity.WARN)
@@ -114,15 +118,7 @@ bolo_protocol.experts = {
 	invalid_string_length_expert
 }
 
-local packet_type_names =
-{
-	[0x02] = "Game State",
-	[0x04] = "Game State Acknowledge",
-	[0x08] = "Password",
-	[0x0d] = "Game Info Request",
-	[0x0e] = "Game Info"
-
-}
+------ Packet Type Dissectors ------
 
 function dissect_packet_type_00(buffer, pinfo, tree)
 	local buffer_length = buffer:len()
@@ -152,7 +148,7 @@ function dissect_game_state(buffer, pinfo, tree)
 	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 
 	while pos < buffer_length do
-		pos = pos + dissect_state_block(buffer(pos), t)
+		pos = pos + dissect_block(buffer(pos), t)
 	end
 end
 
@@ -361,40 +357,21 @@ local packet_type_dissectors =
 	[0x0e] = dissect_game_info
 }
 
-function bolo_protocol.dissector(buffer, pinfo, tree)
-	pinfo.cols.protocol = bolo_protocol.name
-	local t = tree:add(bolo_protocol, buffer(), "Bolo Protocol")
+local packet_type_names =
+{
+	[0x02] = "Game State",
+	[0x04] = "Game State Acknowledge",
+	[0x08] = "Password",
+	[0x0d] = "Game Info Request",
+	[0x0e] = "Game Info"
+}
 
-	t:add(signature_field, buffer(0, 4))
+------ Block Dissector ------
 
-	local version_major = buffer(4, 1):uint()
-	local version_minor = buffer(5, 1):uint()
-	local version_build = buffer(6, 1):uint()
-	local version_string = string.format("%x.%x.%x", version_major, version_minor, version_build)
-	t:append_text(string.format(", Version: %s", version_string))
-	t:add(version_field, buffer(4, 3), version_string)
-
-	local packet_type = buffer(7, 1):uint()
-	local packet_type_name = packet_type_names[packet_type]
-	if packet_type_name == nil then packet_type_name = "Unknown" end
-	t:append_text(string.format(", Packet Type: %s (0x%02x)", packet_type_name, packet_type))
-	t:add(packet_type_field, buffer(7, 1), packet_type_name):append_text(string.format(" (0x%02x)", packet_type))
-
-	local packet_type_dissector = packet_type_dissectors[packet_type]
-	if packet_type_dissector ~= nil then
-		packet_type_dissector(buffer(8), pinfo, tree)
-	else
-		t:add_proto_expert_info(unknown_packet_type_expert)
-		if buffer:len() > 8 then
-			t:add(unknown_field, buffer(8))
-		end
-	end
-end
-
-function dissect_state_block(buffer, tree)
+function dissect_block(buffer, tree)
 	local pos = 0
 	local length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
-	local t = tree:add(state_block_field, buffer(pos, length + 1), length); pos = pos + 1
+	local t = tree:add(block_field, buffer(pos, length + 1), length); pos = pos + 1
 
 	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 	t:add(player_field, buffer(pos, 1)); pos = pos + 1
@@ -587,6 +564,40 @@ function dissect_opcode(opcode, buffer, tree)
 	return pos
 end
 
+------ Header Dissector ------
+
+function bolo_protocol.dissector(buffer, pinfo, tree)
+	pinfo.cols.protocol = bolo_protocol.name
+	local t = tree:add(bolo_protocol, buffer(), "Bolo Protocol")
+
+	t:add(signature_field, buffer(0, 4))
+
+	local version_major = buffer(4, 1):uint()
+	local version_minor = buffer(5, 1):uint()
+	local version_build = buffer(6, 1):uint()
+	local version_string = string.format("%x.%x.%x", version_major, version_minor, version_build)
+	t:append_text(string.format(", Version: %s", version_string))
+	t:add(version_field, buffer(4, 3), version_string)
+
+	local packet_type = buffer(7, 1):uint()
+	local packet_type_name = packet_type_names[packet_type]
+	if packet_type_name == nil then packet_type_name = "Unknown" end
+	t:append_text(string.format(", Packet Type: %s (0x%02x)", packet_type_name, packet_type))
+	t:add(packet_type_field, buffer(7, 1), packet_type_name):append_text(string.format(" (0x%02x)", packet_type))
+
+	local packet_type_dissector = packet_type_dissectors[packet_type]
+	if packet_type_dissector ~= nil then
+		packet_type_dissector(buffer(8), pinfo, tree)
+	else
+		t:add_proto_expert_info(unknown_packet_type_expert)
+		if buffer:len() > 8 then
+			t:add(unknown_field, buffer(8))
+		end
+	end
+end
+
+------ Utility Functions ------
+
 function dissect_pascal_string(buffer, tree, field, fixed_length)
 	fixed_length = fixed_length or 0
 
@@ -628,6 +639,8 @@ end
 function convert_time_from_mac(mac_time)
 	return mac_time - 2082844800
 end
+
+------ Dissector Registration ------
 
 local function heuristic_checker(buffer, pinfo, tree)
     if buffer:len() < 8 then return false end

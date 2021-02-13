@@ -11,8 +11,8 @@ padding_field = ProtoField.bytes("bolo.padding", "Padding", base.SPACE)
 
 -- Header
 signature_field = ProtoField.string("bolo.signature", "Signature", base.ASCII)
-version_field = ProtoField.bytes("bolo.version", "Version", base.DOT)
-packet_type_field = ProtoField.uint8("bolo.packet_type", "Packet Type", base.HEX)
+version_field = ProtoField.string("bolo.version", "Version", base.ASCII)
+packet_type_field = ProtoField.string("bolo.packet_type", "Packet Type", base.ASCII)
 
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
@@ -371,14 +371,14 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 	local version_minor = buffer(5, 1):uint()
 	local version_build = buffer(6, 1):uint()
 	local version_string = string.format("%x.%x.%x", version_major, version_minor, version_build)
-	t:append_text(", Version: " .. version_string)
-	t:add(version_field, buffer(4, 3)):append_text(" (" .. version_string .. ")")
+	t:append_text(string.format(", Version: %s", version_string))
+	t:add(version_field, buffer(4, 3), version_string)
 
 	local packet_type = buffer(7, 1):uint()
 	local packet_type_name = packet_type_names[packet_type]
-	if packet_type_name == nil then packet_type_name = "UNKNOWN" end
+	if packet_type_name == nil then packet_type_name = "Unknown" end
 	t:append_text(string.format(", Packet Type: %s (0x%02x)", packet_type_name, packet_type))
-	t:add(packet_type_field, buffer(7, 1)):append_text(" (" .. packet_type_name .. ")")
+	t:add(packet_type_field, buffer(7, 1), packet_type_name):append_text(string.format(" (0x%02x)", packet_type))
 
 	local packet_type_dissector = packet_type_dissectors[packet_type]
 	if packet_type_dissector ~= nil then

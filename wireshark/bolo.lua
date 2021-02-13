@@ -326,6 +326,16 @@ function dissect_opcode(opcode, buffer, tree)
 			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
 			-- TODO: add expert
 		end			
+	elseif opcode == 0xf0 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local buffer_length = buffer(pos):len()
+		if buffer_length >= 3 then
+			t:add(unknown_field, buffer(pos, 3)); pos = pos + 3
+		else
+			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
+			-- TODO: add expert
+		end			
 	elseif opcode == 0xf1 then
 		local subcode = buffer(pos + 1, 1):uint()
 		if subcode == 0x01 then
@@ -387,6 +397,16 @@ function dissect_opcode(opcode, buffer, tree)
 			end
 			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 		end
+	elseif opcode == 0xf2 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local buffer_length = buffer(pos):len()
+		if buffer_length >= 4 then
+			t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+		else
+			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
+			-- TODO: add expert
+		end			
 	elseif opcode == 0xf3 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2

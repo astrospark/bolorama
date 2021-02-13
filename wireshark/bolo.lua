@@ -207,10 +207,14 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 	end
 
 	if packet_type == 0x0d then
-		local td = tree:add(bolo_protocol, buffer(8), "Bolo Request Game Info")
 		local pos = 8
+		local buffer_length = buffer(pos):len()
+		if buffer_length > 0 then
+			local td = tree:add(bolo_protocol, buffer(8), "Bolo Request Game Info")
+			local pos = 8
 
-		td:add(unknown_field, buffer(pos))
+			td:add(unknown_field, buffer(pos))
+		end
 	end
 
 	if packet_type == 0x0e then

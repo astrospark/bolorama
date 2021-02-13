@@ -16,6 +16,7 @@ packet_type_field = ProtoField.uint8("bolo.packet_type", "packet_type", base.HEX
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "sequence", base.HEX)
 state_block_field = ProtoField.uint8("bolo.state_block", "state_block", base.UNIT_STRING, {" byte", " bytes"})
+player_field = ProtoField.uint8("bolo.player", "player", base.DEC)
 opcode_field = ProtoField.uint8("bolo.opcode", "opcode", base.HEX)
 subcode_field = ProtoField.uint8("bolo.subcode", "subcode", base.HEX)
 
@@ -75,7 +76,8 @@ bolo_protocol.fields = {
 	signature_field, version_field, packet_type_field,
 
 	-- Packet Type 0x02 Game State
-	sequence_field, state_block_field, opcode_field, subcode_field,
+	sequence_field, state_block_field, player_field,
+	opcode_field, subcode_field,
 	host_address_field,
 	message_length_field, message_field,
 	map_pillbox_count_field, map_pillbox_data_field,
@@ -280,12 +282,14 @@ function dissect_state_block(buffer, tree)
 	local length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
 	local t = tree:add(state_block_field, buffer(pos, length + 1), length); pos = pos + 1
 
-	t:add(unknown_field, buffer(pos, 3)); pos = pos + 3
+	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
+	t:add(player_field, buffer(pos, 1)); pos = pos + 1
+	t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
 
 	local remaining = length - 3
 	while remaining > 0 do
 		local opcode = buffer(pos, 1):uint()
-		local dissected = dissect_opcode(opcode, buffer(pos), t)
+		local dissected = dissect_opcode(opcode, buffer(pos, remaining), t)
 		if dissected == 0 then
 			t:add(unknown_field, buffer(pos, remaining)); pos = pos + remaining
 			remaining = 0
@@ -314,7 +318,14 @@ function dissect_opcode(opcode, buffer, tree)
 
 	if opcode == 0x9c then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+
+		local buffer_length = buffer(pos):len()
+		if buffer_length >= 4 then
+			t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+		else
+			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
+			-- TODO: add expert
+		end			
 	elseif opcode == 0xf1 then
 		local subcode = buffer(pos + 1, 1):uint()
 		if subcode == 0x01 then

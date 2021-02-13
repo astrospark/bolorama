@@ -368,35 +368,36 @@ local packet_type_names =
 ------ Block Dissector ------
 
 function dissect_block(buffer, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
 	local pos = 0
-	local length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
-	local t = tree:add(block_field, buffer(pos, length + 1), length); pos = pos + 1
+	while pos < buffer_length do
+		local block_length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
+		local t = tree:add(block_field, buffer(pos, block_length + 1), block_length); pos = pos + 1
 
-	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
-	t:add(player_field, buffer(pos, 1)); pos = pos + 1
-	t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
+		if pos + block_length <= buffer_length then
+			if block_length >= 3 then
+				local sequence = buffer(pos, 1):uint()
+				t:append_text(string.format(", Sequence: 0x%02x", sequence))
+				t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 
-	local remaining = length - 3
-	while remaining > 0 do
-		local opcode = buffer(pos, 1):uint()
-		local dissected = dissect_opcode(opcode, buffer(pos, remaining), t)
-		if dissected == 0 then
-			t:add(unknown_field, buffer(pos, remaining)); pos = pos + remaining
-			remaining = 0
-		else
-			pos = pos + dissected
-			remaining = remaining - dissected
+				t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+			end
 		end
-	end
 
-	if length + 1 > pos then
-		local opcode = buffer(pos, 1):uint()
-		local dissected = dissect_opcode(opcode, buffer(pos), t)
-		pos = pos + dissected
-		remaining = length - 3 - dissected
-		if remaining > 0 then
-			-- t:add_proto_expert_info(unknown_opcode_expert)
-			t:add(unknown_field, buffer(pos, remaining)); pos = pos + remaining
+		local remaining = block_length - 3
+		while remaining > 0 do
+			local opcode = buffer(pos, 1):uint()
+			local dissected = dissect_opcode(opcode, buffer(pos, remaining), t)
+			if dissected == 0 then
+				t:add(unknown_field, buffer(pos, remaining)); pos = pos + remaining
+				pos = buffer_length
+				remaining = 0
+			else
+				pos = pos + dissected
+				remaining = remaining - dissected
+			end
 		end
 	end
 

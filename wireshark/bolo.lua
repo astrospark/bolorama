@@ -312,7 +312,10 @@ end
 function dissect_opcode(opcode, buffer, tree)
 	local pos = 0
 
-	if opcode == 0xf1 then
+	if opcode == 0x9c then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+	elseif opcode == 0xf1 then
 		local subcode = buffer(pos + 1, 1):uint()
 		if subcode == 0x01 then
 			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1

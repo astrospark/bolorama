@@ -14,7 +14,7 @@ padding_field = ProtoField.bytes("bolo.padding", "Padding", base.SPACE)
 -- Header
 signature_field = ProtoField.string("bolo.signature", "Signature", base.ASCII)
 version_field = ProtoField.string("bolo.version", "Version", base.ASCII)
-packet_type_field = ProtoField.string("bolo.packet_type", "Packet Type", base.ASCII)
+packet_type_field = ProtoField.uint8("bolo.packet_type", "Packet Type", base.HEX)
 
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
@@ -304,9 +304,8 @@ function dissect_game_info(buffer, pinfo, tree)
 		end
 
 		local host_address = buffer(pos, 4):ipv4()
-		t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
-
 		t:append_text(string.format(", Host: %s", host_address))
+		t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
 
 		local start_time_mac = buffer(pos, 4):uint()
 		local start_time = convert_time_from_mac(start_time_mac)
@@ -403,6 +402,8 @@ function dissect_block(buffer, tree)
 
 	return pos
 end
+
+------ Opcode Dissectors ------
 
 function dissect_opcode(opcode, buffer, tree)
 	local pos = 0
@@ -583,7 +584,7 @@ function bolo_protocol.dissector(buffer, pinfo, tree)
 	local packet_type_name = packet_type_names[packet_type]
 	if packet_type_name == nil then packet_type_name = "Unknown" end
 	t:append_text(string.format(", Packet Type: %s (0x%02x)", packet_type_name, packet_type))
-	t:add(packet_type_field, buffer(7, 1), packet_type_name):append_text(string.format(" (0x%02x)", packet_type))
+	t:add(packet_type_field, buffer(7, 1)):append_text(string.format(" (%s)", packet_type_name))
 
 	local packet_type_dissector = packet_type_dissectors[packet_type]
 	if packet_type_dissector ~= nil then

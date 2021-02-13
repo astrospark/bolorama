@@ -477,4 +477,11 @@ function dissect_opcode(opcode, buffer, tree)
 	return pos
 end
 
-DissectorTable.get("udp.port"):add(50000, bolo_protocol)
+local function heuristic_checker(buffer, pinfo, tree)
+    if buffer:len() < 8 then return false end
+    if buffer(0, 4):string() ~= "Bolo" then return false end
+    bolo_protocol.dissector(buffer, pinfo, tree)
+    return true
+end
+
+bolo_protocol:register_heuristic("udp", heuristic_checker)

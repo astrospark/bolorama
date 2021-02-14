@@ -369,8 +369,8 @@ function dissect_opcode_9c(buffer, pinfo, tree)
 	local buffer_length = buffer:len()
 	if buffer_length < 1 then return end
 
-	local t = tree:add(opcode_field, buffer(0, 1))
 	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 
 	if buffer_length >= 4 then
 		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
@@ -386,8 +386,8 @@ function dissect_opcode_f0(buffer, pinfo, tree)
 	local buffer_length = buffer:len()
 	if buffer_length < 1 then return end
 
-	local t = tree:add(opcode_field, buffer(0, 1))
 	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 
 	if buffer_length >= 3 then
 		t:add(unknown_field, buffer(pos, 3)); pos = pos + 3

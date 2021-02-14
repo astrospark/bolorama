@@ -26,7 +26,6 @@ subcode_field = ProtoField.uint8("bolo.subcode", "Subcode", base.HEX)
 host_address_field = ProtoField.ipv4("bolo.host_address", "Host Address")
 
 -- Opcode 0xfa
-message_length_field = ProtoField.uint8("bolo.message_length", "Message Length", base.DEC)
 message_field = ProtoField.string("bolo.message", "Message", base.ASCII)
 
 map_pillbox_count_field = ProtoField.uint8("bolo.map_pillbox_count", "Map Pillbox Count", base.DEC)
@@ -36,10 +35,8 @@ map_base_data_field = ProtoField.bytes("bolo.map_base_data", "Map Base Data", ba
 map_start_count_field = ProtoField.uint8("bolo.map_start_count", "Map Start Count", base.DEC)
 map_start_data_field = ProtoField.bytes("bolo.map_start_data", "Map Start Data", base.SPACE)
 
-user_name_length_field = ProtoField.uint8("bolo.user_name_length", "User Name Length", base.DEC)
-user_name_field = ProtoField.string("bolo.user_name", "User Name", base.ASCII)
+player_name_field = ProtoField.string("bolo.player_name", "Player Name", base.ASCII)
 
-map_name_length_field = ProtoField.uint8("bolo.map_name_length", "Map Name Length", base.DEC)
 map_name_field = ProtoField.string("bolo.map_name", "Map Name", base.ASCII)
 
 start_time_field = ProtoField.string("bolo.start_time", "Start Time", base.ASCII)
@@ -64,7 +61,6 @@ peer_address_field = ProtoField.ipv4("bolo.peer_address", "Peer Address")
 peer_port_field = ProtoField.uint16("bolo.peer_port", "Peer Port")
 
 -- Packet Type 0x08 Password
-password_length_field = ProtoField.uint8("bolo.password_length", "Password Length", base.DEC)
 password_field = ProtoField.string("bolo.password", "Password", base.ASCII)
 
 -- Packet Type 0x0E
@@ -88,7 +84,7 @@ bolo_protocol.fields = {
 	map_base_count_field, map_base_data_field,
 	map_start_count_field, map_start_data_field,
 
-	user_name_length_field, user_name_field,
+	player_name_length_field, player_name_field,
 	map_name_length_field, map_name_field,
 	start_time_field,
 	game_type_field, game_flags_field, mines_visible_field,
@@ -110,11 +106,13 @@ bolo_protocol.fields = {
 
 unknown_packet_type_expert = ProtoExpert.new("bolo.unknown_packet_type_expert.expert", "Unknown packet type", expert.group.UNDECODED, expert.severity.WARN)
 unknown_opcode_expert = ProtoExpert.new("bolo.unknown_opcode.expert", "Unknown opcode", expert.group.UNDECODED, expert.severity.WARN)
+opcode_buffer_underrun_expert = ProtoExpert.new("bolo.opcode_buffer_underrun.expert", "Opcode buffer underrun", expert.group.MALFORMED, expert.severity.WARN)
 invalid_string_length_expert = ProtoExpert.new("bolo.invalid_string_length.expert", "Invalid string length", expert.group.MALFORMED, expert.severity.WARN)
 
 bolo_protocol.experts = {
 	unknown_packet_type_expert,
 	unknown_opcode_expert,
+	opcode_buffer_underrun_expert,
 	invalid_string_length_expert
 }
 
@@ -148,7 +146,7 @@ function dissect_game_state(buffer, pinfo, tree)
 	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 
 	while pos < buffer_length do
-		pos = pos + dissect_block(buffer(pos), t)
+		pos = pos + dissect_block(buffer(pos), pinfo, t)
 	end
 end
 
@@ -365,15 +363,246 @@ local packet_type_names =
 	[0x0e] = "Game Info"
 }
 
------- Block Dissector ------
+------ Opcode Dissectors ------
 
-function dissect_block(buffer, tree)
+function dissect_opcode_9c(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local t = tree:add(opcode_field, buffer(0, 1))
+	local pos = 0
+
+	if buffer_length >= 4 then
+		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
+	end
+
+	return pos
+end
+
+function dissect_opcode_f0(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local t = tree:add(opcode_field, buffer(0, 1))
+	local pos = 0
+
+	if buffer_length >= 3 then
+		t:add(unknown_field, buffer(pos, 3)); pos = pos + 3
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos)); pos = buffer_length
+	end
+
+	return pos
+end
+
+function dissect_opcode_f1(buffer, pinfo, tree)
+	local pos = 0
+	local subcode = buffer(pos + 1, 1):uint()
+	if subcode == 0x01 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local map_name, map_name_length = dissect_pascal_string(buffer(pos), t, map_name_field, 35)
+
+		if map_name ~= nil then
+			t:append_text(string.format(", Map: %s", map_name))
+			pos = pos + 36
+		end
+		
+		local host_address = buffer(pos, 4):ipv4()
+		t:append_text(string.format(", Host: %s", host_address))
+		t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
+
+		local start_time_mac = buffer(pos, 4):uint()
+		local start_time = convert_time_from_mac(start_time_mac)
+		local start_time_string = os.date("%c", start_time)
+		t:add(start_time_field, buffer(pos, 4), start_time_string); pos = pos + 4
+
+		t:add(game_type_field, buffer(pos, 1)); pos = pos + 1
+
+		local game_flags_tree = t:add(game_flags_field, buffer(pos, 1));
+		game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
+
+		t:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
+		t:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
+		t:add_le(start_delay_field, buffer(pos, 4)); pos = pos + 4
+		t:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
+
+		t:add(unknown_field, buffer(pos, 32)); pos = pos + 32
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	elseif subcode == 0x02 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local pillbox_count = buffer(pos, 1):uint()
+		t:append_text(string.format(", Map Pillbox Count: %d", pillbox_count))
+		t:add(map_pillbox_count_field, buffer(pos, 1)); pos = pos + 1
+		for x = 0, pillbox_count - 1 do
+			t:add(map_pillbox_data_field, buffer(pos, 5)); pos = pos + 5
+		end
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	elseif subcode == 0x03 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local base_count = buffer(pos, 1):uint()
+		t:append_text(string.format(", Map Base Count: %d", base_count))
+		t:add(map_base_count_field, buffer(pos, 1)); pos = pos + 1
+		for x = 0, base_count - 1 do
+			t:add(map_base_data_field, buffer(pos, 6)); pos = pos + 6
+		end
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	elseif subcode == 0x04 then
+		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
+
+		local start_count = buffer(pos, 1):uint()
+		t:append_text(string.format(", Map Start Count: %d", start_count))
+		t:add(map_start_count_field, buffer(pos, 1)); pos = pos + 1
+		for x = 0, start_count - 1 do
+			t:add(map_start_data_field, buffer(pos, 3)); pos = pos + 3
+		end
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	end
+
+	return pos
+end
+
+function dissect_opcode_f2(buffer, pinfo, tree)
 	local buffer_length = buffer:len()
 	if buffer_length < 1 then return end
 
 	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+	if buffer_length >= 4 then
+		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos)); pos = buffer_length
+	end
+
+	return pos
+end
+
+function dissect_opcode_f3(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+	if buffer_length >= 3 then
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		return buffer_length
+	end
+
+	local length = buffer(pos, 1):uint() - 1
+	t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
+
+	if length > buffer_length - pos then
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos))
+		return buffer_length
+	end
+
+	t:add(unknown_field, buffer(pos, length)); pos = pos + length
+
+	if buffer_length - pos < 2 then
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos))
+		return buffer_length
+	end
+
+	t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+
+	return pos
+end
+
+function dissect_player_name(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+	local player_name, player_name_length = dissect_pascal_string(buffer(pos), t, player_name_field)
+
+	if player_name ~= nil then
+		t:append_text(string.format(", Player Name: %s", player_name))
+		pos = pos + player_name_length + 1
+	else
+		-- t:add_proto_expert_info()
+		t:add(unknown_field, buffer(pos))
+		return buffer_length
+	end
+
+	return pos
+end
+
+function dissect_send_message(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+	if buffer_length >= 3 then
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		return buffer_length
+	end
+
+	local message, message_length = dissect_pascal_string(buffer(pos), t, message_field)
+
+	if message ~= nil then
+		t:append_text(string.format(", Message: %s", message))
+		pos = pos + message_length + 1
+	else
+		-- t:add_proto_expert_info()
+		t:add(unknown_field, buffer(pos))
+		return buffer_length
+	end
+
+	if buffer_length - pos < 2 then
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos))
+		return buffer_length
+	end
+
+	t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+
+	return pos
+end
+
+local opcode_dissectors =
+{
+	[0x9c] = dissect_opcode_9c,
+	[0xf0] = dissect_opcode_f0,
+	[0xf1] = dissect_opcode_f1,
+	[0xf2] = dissect_opcode_f2,
+	[0xf3] = dissect_opcode_f3,
+	[0xf8] = dissect_player_name,
+	[0xfa] = dissect_send_message
+}
+
+------ Block Dissector ------
+
+function dissect_block(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return 0 end
+
+	local pos = 0
 	while pos < buffer_length do
 		local block_length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
+		local block_end = pos + block_length
 		local t = tree:add(block_field, buffer(pos, block_length + 1), block_length); pos = pos + 1
 
 		if pos + block_length <= buffer_length then
@@ -389,177 +618,22 @@ function dissect_block(buffer, tree)
 		local remaining = block_length - 3
 		while remaining > 0 do
 			local opcode = buffer(pos, 1):uint()
-			local dissected = dissect_opcode(opcode, buffer(pos, remaining), t)
+
+			local dissected = 0
+			local opcode_dissector = opcode_dissectors[opcode]
+			if opcode_dissector ~= nil then
+				dissected = opcode_dissector(buffer(pos, remaining), pinfo, t)
+			end
+
 			if dissected == 0 then
-				t:add(unknown_field, buffer(pos, remaining)); pos = pos + remaining
-				pos = buffer_length
+				-- t:add_proto_expert_info(unknown_opcode_expert)
+				t:add(unknown_field, buffer(pos, remaining))
+				pos = block_end + 1
 				remaining = 0
 			else
 				pos = pos + dissected
 				remaining = remaining - dissected
 			end
-		end
-	end
-
-	return pos
-end
-
------- Opcode Dissectors ------
-
-function dissect_opcode(opcode, buffer, tree)
-	local pos = 0
-
-	if opcode == 0x9c then
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-
-		local buffer_length = buffer(pos):len()
-		if buffer_length >= 4 then
-			t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
-		else
-			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-			-- TODO: add expert
-		end			
-	elseif opcode == 0xf0 then
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-
-		local buffer_length = buffer(pos):len()
-		if buffer_length >= 3 then
-			t:add(unknown_field, buffer(pos, 3)); pos = pos + 3
-		else
-			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-			-- TODO: add expert
-		end			
-	elseif opcode == 0xf1 then
-		local subcode = buffer(pos + 1, 1):uint()
-		if subcode == 0x01 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			local map_name_length = buffer(pos, 1):uint()
-			t:add(map_name_length_field, buffer(pos, 1)); pos = pos + 1
-
-			local map_name_end = pos + map_name_length
-			local padding_length = 35 - map_name_length
-			t:add(map_name_field, buffer(pos, map_name_length))
-			if padding_length > 0 then t:add(padding_field, buffer(map_name_end, padding_length)) end
-			pos = pos + 35
-
-			t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
-
-			t:add_le(start_time_field, buffer(pos, 4)); pos = pos + 4
-			t:add(game_type_field, buffer(pos, 1)); pos = pos + 1
-
-			local game_flags_tree = t:add(game_flags_field, buffer(pos, 1));
-			game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
-
-			t:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
-			t:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
-			t:add_le(start_delay_field, buffer(pos, 4)); pos = pos + 4
-			t:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
-
-			t:add(unknown_field, buffer(pos, 32)); pos = pos + 32
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		elseif subcode == 0x02 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			local pillbox_count = buffer(pos, 1):uint()
-			t:add(map_pillbox_count_field, buffer(pos, 1)); pos = pos + 1
-			for x = 0, pillbox_count - 1 do
-				t:add(map_pillbox_data_field, buffer(pos, 5)); pos = pos + 5
-			end
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		elseif subcode == 0x03 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			local base_count = buffer(pos, 1):uint()
-			t:add(map_base_count_field, buffer(pos, 1)); pos = pos + 1
-			for x = 0, base_count - 1 do
-				t:add(map_base_data_field, buffer(pos, 6)); pos = pos + 6
-			end
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		elseif subcode == 0x04 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
-
-			local start_count = buffer(pos, 1):uint()
-			t:add(map_start_count_field, buffer(pos, 1)); pos = pos + 1
-			for x = 0, start_count - 1 do
-				t:add(map_start_data_field, buffer(pos, 3)); pos = pos + 3
-			end
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-		end
-	elseif opcode == 0xf2 then
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-
-		local buffer_length = buffer(pos):len()
-		if buffer_length >= 4 then
-			t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
-		else
-			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-			-- TODO: add expert
-		end			
-	elseif opcode == 0xf3 then
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-
-		local length = buffer(pos, 1):uint()
-		t:add(unknown_field, buffer(pos, length)); pos = pos + length
-
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-	elseif opcode == 0xf8 then -- user name
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-
-		local buffer_length = buffer(pos):len()
-		if buffer_length > 1 then
-			local user_name_length = buffer(pos, 1):uint()
-			t:add(user_name_length_field, buffer(pos, 1)); pos = pos + 1
-
-			buffer_length = buffer(pos):len()
-			if user_name_length <= buffer_length then
-				t:add(user_name_field, buffer(pos, user_name_length)); pos = pos + user_name_length
-			else
-				t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-				-- TODO: add expert
-			end
-		else
-			-- TODO: add expert
-		end
-	elseif opcode == 0xfa then -- message
-		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-
-		local buffer_length = buffer(pos):len()
-		if buffer_length > 3 then
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-
-			local message_length = buffer(pos, 1):uint()
-			t:add(message_length_field, buffer(pos, 1)); pos = pos + 1
-
-			buffer_length = buffer(pos):len()
-			if message_length + 2 <= buffer_length then
-				t:add(message_field, buffer(pos, message_length)); pos = pos + message_length
-				t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-			else
-				t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-				-- TODO: add expert
-			end
-		else
-			t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
-			-- TODO: add expert
-		end
-	elseif opcode == 0xff then
-		local subcode = buffer(pos + 1, 1):uint()
-		if subcode == 0xf0 then
-			local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-
-			for x = 0, 2 do
-				t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
-				t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
-			end
-
-			t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 		end
 	end
 
@@ -612,8 +686,8 @@ function dissect_pascal_string(buffer, tree, field, fixed_length)
 	local string_end = pos + string_length + 1
 
 	if (fixed_length ~= 0 and
-	    buffer_length < fixed_length + 1) or
-	   string_length > fixed_length or 
+	    buffer_length < fixed_length + 1 and
+	    string_length > fixed_length) or 
 	   string_end > buffer_length then
 		tree:add_proto_expert_info(invalid_string_length_expert)
 		return nil, 0

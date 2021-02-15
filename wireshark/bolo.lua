@@ -19,7 +19,7 @@ packet_type_field = ProtoField.uint8("bolo.packet_type", "Packet Type", base.HEX
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
 block_field = ProtoField.uint8("bolo.block", "Block", base.UNIT_STRING, {" byte", " bytes"})
-player_field = ProtoField.uint8("bolo.player", "Player", base.DEC)
+sender_field = ProtoField.uint8("bolo.sender", "Sender", base.HEX)
 opcode_field = ProtoField.uint8("bolo.opcode", "Opcode", base.HEX)
 subcode_field = ProtoField.uint8("bolo.subcode", "Subcode", base.HEX)
 
@@ -27,6 +27,11 @@ host_address_field = ProtoField.ipv4("bolo.host_address", "Host Address")
 
 -- Opcode 0xfa
 message_field = ProtoField.string("bolo.message", "Message", base.ASCII)
+
+-- Opcode 0xff
+upstream_address_field = ProtoField.string("bolo.upstream_address", "Upstream Address")
+sender_address_field = ProtoField.string("bolo.sender_address", "Sender Address")
+downstream_address_field = ProtoField.string("bolo.downstream_address", "Downstream Address")
 
 map_pillbox_count_field = ProtoField.uint8("bolo.map_pillbox_count", "Map Pillbox Count", base.DEC)
 map_pillbox_data_field = ProtoField.bytes("bolo.map_pillbox_data", "Map Pillbox Data", base.SPACE)
@@ -56,9 +61,8 @@ computer_advantage_field = ProtoField.bool("bolo.computer_advantage", "Computer 
 start_delay_field = ProtoField.uint32("bolo.start_delay", "Start Delay", base.UNIT_STRING, {" Second", " Seconds"})
 time_limit_field = ProtoField.uint32("bolo.time_limit", "Time Limit", base.UNIT_STRING, {" Minute", " Minutes"})
 
--- Packet Type 0x07
-peer_address_field = ProtoField.ipv4("bolo.peer_address", "Peer Address")
-peer_port_field = ProtoField.uint16("bolo.peer_port", "Peer Port")
+-- Packet Type 0x06
+peer_address_field = ProtoField.string("bolo.peer_address", "Peer Address")
 
 -- Packet Type 0x08 Password
 password_field = ProtoField.string("bolo.password", "Password", base.ASCII)
@@ -76,7 +80,7 @@ bolo_protocol.fields = {
 	signature_field, version_field, packet_type_field,
 
 	-- Packet Type 0x02 Game State
-	sequence_field, block_field, player_field,
+	sequence_field, block_field, sender_field,
 	opcode_field, subcode_field,
 	host_address_field,
 	message_length_field, message_field,
@@ -91,8 +95,11 @@ bolo_protocol.fields = {
 	allow_computer_field, computer_advantage_field,
 	start_delay_field, time_limit_field,
 
-	-- Packet Type 0x07
-	peer_address_field, peer_port_field,
+	-- Packet Type 0x06
+	peer_address_field,
+
+	-- Opcode 0xff
+	upstream_address_field, sender_address_field, downstream_address_field,
 
 	-- Packet Type 0x08 Password
 	password_length_field, password_field,
@@ -198,13 +205,12 @@ function dissect_packet_type_06(buffer, pinfo, tree)
 	if buffer_length >= 10 then
 		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
 
-		local peer_address = buffer(pos, 4):ipv4()
-		t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
+		local peer_ip = buffer(pos, 4):ipv4()
+		local peer_port = buffer(pos + 4, 2):uint()
+		local peer_address = string.format("%s:%d", peer_ip, peer_port)
+		t:add(peer_address_field, buffer(pos, 6), peer_address); pos = pos + 6
 
-		local peer_port = buffer(pos, 2):uint()
-		t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
-
-		t:append_text(string.format(", Peer: %s:%d", peer_address, peer_port))
+		t:append_text(string.format(", Peer: %s", peer_address))
 	end
 
 	if pos < buffer_length then
@@ -222,13 +228,12 @@ function dissect_packet_type_07(buffer, pinfo, tree)
 	if buffer_length >= 10 then
 		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
 
-		local peer_address = buffer(pos, 4):ipv4()
-		t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
+		local peer_ip = buffer(pos, 4):ipv4()
+		local peer_port = buffer(pos + 4, 2):uint()
+		local peer_address = string.format("%s:%d", peer_ip, peer_port)
+		t:add(peer_address_field, buffer(pos, 6), peer_address); pos = pos + 6
 
-		local peer_port = buffer(pos, 2):uint()
-		t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
-
-		t:append_text(string.format(", Peer: %s:%d", peer_address, peer_port))
+		t:append_text(string.format(", Peer: %s", peer_address))
 	end
 
 	if pos < buffer_length then
@@ -265,13 +270,12 @@ function dissect_packet_type_09(buffer, pinfo, tree)
 	local pos = 0
 
 	if buffer_length >= 6 then
-		local peer_address = buffer(pos, 4):ipv4()
-		t:add(peer_address_field, buffer(pos, 4)); pos = pos + 4
+		local peer_ip = buffer(pos, 4):ipv4()
+		local peer_port = buffer(pos + 4, 2):uint()
+		local peer_address = string.format("%s:%d", peer_ip, peer_port)
+		t:add(peer_address_field, buffer(pos, 6), peer_address); pos = pos + 6
 
-		local peer_port = buffer(pos, 2):uint()
-		t:add(peer_port_field, buffer(pos, 2)); pos = pos + 2
-
-		t:append_text(string.format(", Peer: %s:%d", peer_address, peer_port))
+		t:append_text(string.format(", Peer: %s", peer_address))
 	end
 
 	if pos < buffer_length then
@@ -588,6 +592,43 @@ function dissect_send_message(buffer, pinfo, tree)
 	return pos
 end
 
+function dissect_opcode_ff(buffer, pinfo, tree)
+	local buffer_length = buffer:len()
+	if buffer_length < 1 then return end
+
+	local pos = 0
+	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
+
+	if buffer_length >= 22 then
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+
+		local upstream_ip = buffer(pos, 4):ipv4()
+		local upstream_port = buffer(pos + 4, 2):uint()
+		local upstream_address = string.format("%s:%d", upstream_ip, upstream_port)
+		t:add(upstream_address_field, buffer(pos, 6), upstream_address); pos = pos + 6
+		t:append_text(string.format(", Upstream: %s", upstream_address))
+
+		local sender_ip = buffer(pos, 4):ipv4()
+		local sender_port = buffer(pos + 4, 2):uint()
+		local sender_address = string.format("%s:%d", sender_ip, sender_port)
+		t:add(sender_address_field, buffer(pos, 6), sender_address); pos = pos + 6
+		t:append_text(string.format(", Sender: %s", sender_address))
+
+		local downstream_ip = buffer(pos, 4):ipv4()
+		local downstream_port = buffer(pos + 4, 2):uint()
+		local downstream_address = string.format("%s:%d", downstream_ip, downstream_port)
+		t:add(downstream_address_field, buffer(pos, 6), downstream_address); pos = pos + 6
+		t:append_text(string.format(", Downstream: %s", downstream_address))
+
+		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	else
+		t:add_proto_expert_info(opcode_buffer_underrun_expert)
+		t:add(unknown_field, buffer(pos)); pos = buffer_length
+	end
+
+	return pos
+end
+
 local opcode_dissectors =
 {
 	[0x9c] = dissect_opcode_9c,
@@ -596,7 +637,8 @@ local opcode_dissectors =
 	[0xf2] = dissect_opcode_f2,
 	[0xf3] = dissect_opcode_f3,
 	[0xf8] = dissect_player_name,
-	[0xfa] = dissect_send_message
+	[0xfa] = dissect_send_message,
+	[0xff] = dissect_opcode_ff
 }
 
 ------ Block Dissector ------
@@ -611,34 +653,43 @@ function dissect_block(buffer, pinfo, tree)
 		local block_end = pos + block_length
 		local t = tree:add(block_field, buffer(pos, block_length + 1), block_length); pos = pos + 1
 
-		if pos + block_length <= buffer_length then
-			if block_length >= 3 then
-				local sequence = buffer(pos, 1):uint()
-				t:append_text(string.format(", Sequence: 0x%02x", sequence))
-				t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
+		if (block_length < 4) then
+			t:add(unknown_field, buffer(pos))
+			pos = block_end + 1
+		else
+			if pos + block_length <= buffer_length then
+				if block_length >= 3 then
+					local sequence = buffer(pos, 1):uint()
+					t:append_text(string.format(", Sequence: 0x%02x", sequence))
+					t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 
-				t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
-			end
-		end
+					local sender = buffer(pos, 1):uint()
+					t:append_text(string.format(", Sender: 0x%02x", sender))
+					t:add(sender_field, buffer(pos, 1)); pos = pos + 1
 
-		local remaining = block_length - 3
-		while remaining > 0 do
-			local opcode = buffer(pos, 1):uint()
-
-			local dissected = 0
-			local opcode_dissector = opcode_dissectors[opcode]
-			if opcode_dissector ~= nil then
-				dissected = opcode_dissector(buffer(pos, remaining), pinfo, t)
+					t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
+				end
 			end
 
-			if dissected == 0 then
-				-- t:add_proto_expert_info(unknown_opcode_expert)
-				t:add(unknown_field, buffer(pos, remaining))
-				pos = block_end + 1
-				remaining = 0
-			else
-				pos = pos + dissected
-				remaining = remaining - dissected
+			local remaining = block_length - 3
+			while remaining > 0 do
+				local opcode = buffer(pos, 1):uint()
+
+				local dissected = 0
+				local opcode_dissector = opcode_dissectors[opcode]
+				if opcode_dissector ~= nil then
+					dissected = opcode_dissector(buffer(pos, remaining), pinfo, t)
+				end
+
+				if dissected == 0 then
+					-- t:add_proto_expert_info(unknown_opcode_expert)
+					t:add(unknown_field, buffer(pos, remaining))
+					pos = block_end + 1
+					remaining = 0
+				else
+					pos = pos + dissected
+					remaining = remaining - dissected
+				end
 			end
 		end
 	end

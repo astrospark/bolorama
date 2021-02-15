@@ -155,6 +155,12 @@ function dissect_packet_type_03(buffer, pinfo, tree)
 	if buffer_length < 1 then return end
 
 	local t = tree:add(bolo_protocol, buffer(), "Bolo Packet Type 0x03")
+	local pos = 0
+
+	local sequence = buffer(pos, 1):uint()
+	t:append_text(string.format(", Sequence: 0x%02x", sequence))
+	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
+
 	t:add(unknown_field, buffer())
 end
 

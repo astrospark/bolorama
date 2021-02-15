@@ -382,7 +382,7 @@ function dissect_opcode_9c(buffer, pinfo, tree)
 		t:add(unknown_field, buffer(pos, 4)); pos = pos + 4
 	else
 		t:add_proto_expert_info(opcode_buffer_underrun_expert)
-		t:add(unknown_field, buffer(pos, buffer_length)); pos = pos + buffer_length
+		t:add(unknown_field, buffer(pos, buffer_length - 1)); pos = pos + buffer_length - 1
 	end
 
 	return pos

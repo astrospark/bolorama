@@ -24,8 +24,8 @@ sender_field = ProtoField.uint8("bolo.sender", "Sender", base.HEX, nil, 0x0f)
 block_flags_field = ProtoField.uint8("bolo.block_flags", "Block Flags", base.HEX)
 
 opcode_field = ProtoField.uint8("bolo.opcode", "Opcode", base.HEX)
-
 subcode_field = ProtoField.uint8("bolo.subcode", "Subcode", base.HEX)
+checksum_field = ProtoField.uint16("bolo.checksum", "Checksum", base.HEX)
 
 host_address_field = ProtoField.ipv4("bolo.host_address", "Host Address")
 
@@ -87,7 +87,7 @@ bolo_protocol.fields = {
 	-- Packet Type 0x02 Game State
 	sequence_field, block_field,
 	sender_flags_field, sender_field, block_flags_field,
-	opcode_field, subcode_field,
+	opcode_field, subcode_field, checksum_field,
 	host_address_field,
 	message_length_field, message_field,
 	map_pillbox_count_field, map_pillbox_data_field,
@@ -449,7 +449,7 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		t:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
 
 		t:add(unknown_field, buffer(pos, 32)); pos = pos + 32
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x02 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -460,7 +460,7 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, pillbox_count - 1 do
 			t:add(map_pillbox_data_field, buffer(pos, 5)); pos = pos + 5
 		end
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x03 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -471,7 +471,7 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, base_count - 1 do
 			t:add(map_base_data_field, buffer(pos, 6)); pos = pos + 6
 		end
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x04 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -482,7 +482,7 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, start_count - 1 do
 			t:add(map_start_data_field, buffer(pos, 3)); pos = pos + 3
 		end
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	end
 
 	return pos
@@ -536,7 +536,7 @@ function dissect_opcode_f3(buffer, pinfo, tree)
 		return buffer_length
 	end
 
-	t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 
 	return pos
 end
@@ -593,7 +593,7 @@ function dissect_send_message(buffer, pinfo, tree)
 		return buffer_length
 	end
 
-	t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+	t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 
 	return pos
 end
@@ -627,7 +627,7 @@ function dissect_opcode_ff(buffer, pinfo, tree)
 		t:add(downstream_address_field, buffer(pos, 6), downstream_address); pos = pos + 6
 		t:append_text(string.format(", Downstream: %s", downstream_address))
 
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	else
 		t:add_proto_expert_info(opcode_buffer_underrun_expert)
 		t:add(unknown_field, buffer(pos)); pos = buffer_length

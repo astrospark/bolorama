@@ -19,10 +19,11 @@ packet_type_field = ProtoField.uint8("bolo.packet_type", "Packet Type", base.HEX
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
 block_field = ProtoField.uint8("bolo.block", "Block", base.UNIT_STRING, {" byte", " bytes"})
+sender_flags_field = ProtoField.uint8("bolo.sender_flags", "Sender Flags", base.HEX, nil, 0xf0)
+sender_field = ProtoField.uint8("bolo.sender", "Sender", base.HEX, nil, 0x0f)
+block_flags_field = ProtoField.uint8("bolo.block_flags", "Block Flags", base.HEX)
 
 opcode_field = ProtoField.uint8("bolo.opcode", "Opcode", base.HEX)
-opcode_flags_field = ProtoField.uint8("bolo.opcode_flags", "Opcode Flags", base.HEX)
-sender_field = ProtoField.uint8("bolo.sender", "Sender", base.HEX, nil, 0x0f)
 
 subcode_field = ProtoField.uint8("bolo.subcode", "Subcode", base.HEX)
 
@@ -85,8 +86,8 @@ bolo_protocol.fields = {
 
 	-- Packet Type 0x02 Game State
 	sequence_field, block_field,
-	opcode_field, opcode_flags_field, sender_field,
-	subcode_field,
+	sender_flags_field, sender_field, block_flags_field,
+	opcode_field, subcode_field,
 	host_address_field,
 	message_length_field, message_field,
 	map_pillbox_count_field, map_pillbox_data_field,
@@ -671,11 +672,10 @@ function dissect_block(buffer, pinfo, tree)
 
 					local sender = bit.band(buffer(pos, 1):uint(), 0x0f)
 					t:append_text(string.format(", Sender: 0x%02x", sender))
-					local flags_field_tree = t:add(opcode_flags_field, buffer(pos, 1))
-					flags_field_tree:append_text(string.format(", Sender: 0x%02x", sender))
-					flags_field_tree:add(sender_field, buffer(pos, 1)); pos = pos + 1
+					t:add(sender_flags_field, buffer(pos, 1))
+					t:add(sender_field, buffer(pos, 1)); pos = pos + 1
 
-					t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
+					t:add(block_flags_field, buffer(pos, 1)); pos = pos + 1
 				end
 			end
 

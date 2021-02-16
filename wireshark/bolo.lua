@@ -32,6 +32,7 @@ host_address_field = ProtoField.ipv4("bolo.host_address", "Host Address")
 message_field = ProtoField.string("bolo.message", "Message", base.ASCII)
 
 -- Opcode 0xff
+address_length_field = ProtoField.uint8("bolo.address_length", "Address Length", base.UNIT_STRING, {" Byte", " Bytes"})
 upstream_address_field = ProtoField.string("bolo.upstream_address", "Upstream Address")
 sender_address_field = ProtoField.string("bolo.sender_address", "Sender Address")
 downstream_address_field = ProtoField.string("bolo.downstream_address", "Downstream Address")
@@ -103,7 +104,7 @@ bolo_protocol.fields = {
 	peer_address_field,
 
 	-- Opcode 0xff
-	upstream_address_field, sender_address_field, downstream_address_field,
+	address_length_field, upstream_address_field, sender_address_field, downstream_address_field,
 
 	-- Packet Type 0x08 Password
 	password_length_field, password_field,
@@ -604,7 +605,8 @@ function dissect_opcode_ff(buffer, pinfo, tree)
 	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 
 	if buffer_length >= 22 then
-		t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
+		t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
+		t:add(address_length_field, buffer(pos, 1)); pos = pos + 1
 
 		local upstream_ip = buffer(pos, 4):ipv4()
 		local upstream_port = buffer(pos + 4, 2):uint()

@@ -6,5 +6,5 @@ Bolorama enables the classic Mac tank game Bolo to work in a post-NATpocalypse w
 
 ```
 cd src
-go run ./main
+go run ./cmd/bolorama
 ```

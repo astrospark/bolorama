@@ -63,7 +63,8 @@ func main() {
 				break
 			}
 
-			gameInfo := bolo.ParsePacketGameInfo(data.Buffer, data.SrcAddr)
+			bolo.RewritePacketGameInfo(data.Buffer, proxyIP)
+			gameInfo := bolo.ParsePacketGameInfo(data.Buffer)
 			bolo.PrintGameInfo(gameInfo)
 
 			_, ok := gameIDRouteTableMap[gameInfo.GameID]
@@ -106,7 +107,7 @@ func main() {
 			if bytes.Contains(data.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
 				fmt.Println()
 				fmt.Println("Warning: Outgoing packet matches 192.168.0.80")
-				fmt.Printf("Src: %s:%d Dst: %s%d\n",
+				fmt.Printf("Src: %s:%d Dst: %s:%d\n",
 					srcRoute.PlayerIPAddr.IP.String(), srcRoute.PlayerIPAddr.Port,
 					dstRoute.PlayerIPAddr.IP.String(), dstRoute.PlayerIPAddr.Port)
 				fmt.Println(hex.Dump(data.Buffer))

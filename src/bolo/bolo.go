@@ -28,10 +28,10 @@ const PacketType8 = 0x08
 const PacketType9 = 0x09
 const PacketTypeGameInfo = 0x0e
 
-const PacketType0PeerAddrOffset = 0
-const PacketType0PeerPortOffset = 4
-const PacketType1PeerAddrOffset = 0
-const PacketType1PeerPortOffset = 4
+const PacketType0PeerAddrOffset = 8
+const PacketType0PeerPortOffset = 12
+const PacketType1PeerAddrOffset = 8
+const PacketType1PeerPortOffset = 12
 const PacketType6PeerAddrOffset = 12
 const PacketType6PeerPortOffset = 16
 const PacketType7PeerAddrOffset = 12

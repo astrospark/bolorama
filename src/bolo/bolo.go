@@ -198,53 +198,63 @@ func rewriteOpcodeGameInfo(pos int, buffer []byte, proxyPort int, proxyIP net.IP
 	buffer[pos+3] = proxyIP[3]
 }
 
-func rewriteGameStateBlock(startPos int, buffer []byte, proxyPort int, proxyIP net.IP) int {
-	blockLength := int(buffer[startPos]&0x7f) + 1
-	pos := startPos + 1
+func rewriteGameStateBlock(posStart int, buffer []byte, proxyPort int, proxyIP net.IP) int {
+	// block length includes length byte, does not include checksum
+	blockLength := int(buffer[posStart] & 0x7f)
+	posBlockStart := posStart + 1
+	posChecksum := posStart + blockLength
+	posNextBlock := posChecksum + 2
 
-	nextBlockPos := pos + blockLength
-	endPos := nextBlockPos - 1
+	//nextBlockPos := pos + blockLength
+	//endPos := nextBlockPos - 1
 
 	if blockLength < 4 {
-		return nextBlockPos
+		if blockLength == 0 && len(buffer)-posStart == 6 {
+			if buffer[posStart] == 0x00 && buffer[posStart+2] == 0x00 {
+				// don't know what this is, but know about it
+				posNextBlock = posStart + 6
+			}
+		}
+		return posNextBlock
 	}
 
-	pos = pos + 3 // skip sequence, sender + flags, unknown byte
+	pos := posBlockStart + 3 // skip sequence, sender + flags, unknown byte
 
 	// sometimes we overrun the buffer here
-	if pos < len(buffer) {
-		opcode := int(buffer[pos])
-		pos = pos + 1
-
-		// TODO: it's possible for blocks to contain multiple opcodes
-
-		rewriteCrc := false
-		switch opcode {
-		case OpcodeMapData:
-			subcode := int(buffer[pos])
-			pos = pos + 1
-
-			if subcode == OpcodeMapDataSubcode01 {
-				rewriteOpcodeGameInfo(pos, buffer, proxyPort, proxyIP)
-				rewriteCrc = true
-			}
-		case OpcodePlayerInfo:
-			if buffer[pos] == 0xf0 && blockLength == 26 {
-				rewriteOpcodePlayerInfo(pos, buffer, proxyPort, proxyIP)
-				rewriteCrc = true
-			}
-		}
-
-		if rewriteCrc {
-			crc64 := crc.CalculateCRC(crc.XMODEM, buffer[startPos:nextBlockPos-2])
-			binary.BigEndian.PutUint16(buffer[endPos-1:nextBlockPos], uint16(crc64))
-		}
-	} else {
-		fmt.Printf("Warning: buffer overrun (pos = %d, len(buffer) = %d\n", pos, len(buffer))
+	if pos >= len(buffer) {
+		fmt.Printf("Warning: buffer overrun (pos = %d, len(buffer) = %d)\n", pos, len(buffer))
 		fmt.Println(hex.Dump(buffer))
+		return posNextBlock
 	}
 
-	return nextBlockPos
+	opcode := int(buffer[pos])
+	pos = pos + 1
+
+	// TODO: it's possible for blocks to contain multiple opcodes
+
+	rewriteCrc := false
+	switch opcode {
+	case OpcodeMapData:
+		subcode := int(buffer[pos])
+		pos = pos + 1
+
+		if subcode == OpcodeMapDataSubcode01 {
+			rewriteOpcodeGameInfo(pos, buffer, proxyPort, proxyIP)
+			rewriteCrc = true
+		}
+	case OpcodePlayerInfo:
+		if buffer[pos] == 0xf0 && blockLength == 26 {
+			rewriteOpcodePlayerInfo(pos, buffer, proxyPort, proxyIP)
+			rewriteCrc = true
+		}
+	}
+
+	if rewriteCrc {
+		crc64 := crc.CalculateCRC(crc.XMODEM, buffer[posStart:posChecksum])
+		binary.BigEndian.PutUint16(buffer[posChecksum:posNextBlock], uint16(crc64))
+	}
+
+	return posNextBlock
 }
 
 func rewritePacketGameState(buffer []byte, proxyPort int, proxyIP net.IP) {

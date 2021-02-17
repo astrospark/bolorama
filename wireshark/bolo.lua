@@ -59,7 +59,7 @@ local game_type_values =
 }
 game_type_field = ProtoField.uint8("bolo.game_type", "Game Type", base.HEX, game_type_values)
 
-game_flags_field = ProtoField.uint8("bolo.game_flags", "Game Flags", base.HEX)
+game_flags_field = ProtoField.uint8("bolo.game_flags", "Game Flags", base.HEX, nil, 0xbf)
 mines_visible_field = ProtoField.uint8("bolo.mines_visible", "Mines Visible", base.HEX, boolean_values, 0x40)
 allow_computer_field = ProtoField.bool("bolo.allow_computer", "Allow Computer")
 computer_advantage_field = ProtoField.bool("bolo.computer_advantage", "Computer Advantage")
@@ -328,8 +328,8 @@ function dissect_game_info(buffer, pinfo, tree)
 
 		t:add(game_type_field, buffer(pos, 1)); pos = pos + 1
 
-		local game_flags_tree = t:add(game_flags_field, buffer(pos, 1))
-		game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
+		t:add(game_flags_field, buffer(pos, 1))
+		t:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
 
 		t:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
 		t:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1
@@ -440,8 +440,8 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 
 		t:add(game_type_field, buffer(pos, 1)); pos = pos + 1
 
-		local game_flags_tree = t:add(game_flags_field, buffer(pos, 1));
-		game_flags_tree:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
+		t:add(game_flags_field, buffer(pos, 1))
+		t:add(mines_visible_field, buffer(pos, 1)); pos = pos + 1
 
 		t:add(allow_computer_field, buffer(pos, 1)); pos = pos + 1
 		t:add(computer_advantage_field, buffer(pos, 1)); pos = pos + 1

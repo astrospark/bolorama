@@ -17,7 +17,6 @@ type Route struct {
 	PlayerIPAddr   net.UDPAddr
 	ProxyPort      int
 	Connection     *net.UDPConn
-	Rewrite        bool
 	RxChannel      chan UdpPacket
 	TxChannel      chan UdpPacket
 	ControlChannel chan struct{}
@@ -96,14 +95,14 @@ func GetRouteByPort(gameIDRouteTableMap map[[8]byte][]Route, port int) ([8]byte,
 	return [8]byte{}, Route{}, fmt.Errorf("Error: Port %d not found in routing tables", port)
 }
 
-func AddPlayer(srcAddr net.UDPAddr, rxChannel chan UdpPacket, rewrite bool) Route {
+func AddPlayer(srcAddr net.UDPAddr, rxChannel chan UdpPacket) Route {
 	nextPlayerPort := getNextAvailablePort(firstPlayerPort, &assignedPlayerPorts)
-	playerRoute := newPlayerRoute(srcAddr, nextPlayerPort, rewrite, rxChannel)
+	playerRoute := newPlayerRoute(srcAddr, nextPlayerPort, rxChannel)
 	createPlayerProxy(playerRoute)
 	return playerRoute
 }
 
-func newPlayerRoute(addr net.UDPAddr, port int, rewrite bool, rxChannel chan UdpPacket) Route {
+func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket) Route {
 	txChannel := make(chan UdpPacket)
 	controlChannel := make(chan struct{})
 
@@ -111,7 +110,6 @@ func newPlayerRoute(addr net.UDPAddr, port int, rewrite bool, rxChannel chan Udp
 		addr,
 		port,
 		nil,
-		rewrite,
 		rxChannel,
 		txChannel,
 		controlChannel,

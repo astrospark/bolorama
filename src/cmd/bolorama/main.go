@@ -69,8 +69,7 @@ func main() {
 
 			_, ok := gameIDRouteTableMap[gameInfo.GameID]
 			if !ok {
-				rewrite := true
-				playerRoute := proxy.AddPlayer(data.SrcAddr, rxChannel, rewrite)
+				playerRoute := proxy.AddPlayer(data.SrcAddr, rxChannel)
 				gameIDRouteTableMap[gameInfo.GameID] = []proxy.Route{playerRoute}
 			}
 
@@ -93,16 +92,13 @@ func main() {
 			// get proxy port by source player ip
 			srcRoute, err := proxy.GetRouteByAddr(gameIDRouteTableMap, data.SrcAddr)
 			if err != nil {
-				rewrite := false
-				srcRoute = proxy.AddPlayer(data.SrcAddr, rxChannel, rewrite)
+				srcRoute = proxy.AddPlayer(data.SrcAddr, rxChannel)
 				gameIDRouteTableMap[gameID] = append(gameIDRouteTableMap[gameID], srcRoute)
 
 				printRouteTable(gameIDRouteTableMap)
 			}
 
-			if srcRoute.Rewrite {
-				bolo.RewritePacket(data, srcRoute, proxyIP)
-			}
+			bolo.RewritePacket(data, srcRoute, proxyIP)
 
 			if bytes.Contains(data.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
 				fmt.Println()

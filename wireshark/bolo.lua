@@ -449,7 +449,6 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		t:add_le(time_limit_field, buffer(pos, 4)); pos = pos + 4
 
 		t:add(unknown_field, buffer(pos, 32)); pos = pos + 32
-		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x02 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -460,7 +459,6 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, pillbox_count - 1 do
 			t:add(map_pillbox_data_field, buffer(pos, 5)); pos = pos + 5
 		end
-		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x03 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -471,7 +469,6 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, base_count - 1 do
 			t:add(map_base_data_field, buffer(pos, 6)); pos = pos + 6
 		end
-		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	elseif subcode == 0x04 then
 		local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 		t:add(subcode_field, buffer(pos, 1)); pos = pos + 1
@@ -482,7 +479,6 @@ function dissect_opcode_f1(buffer, pinfo, tree)
 		for x = 0, start_count - 1 do
 			t:add(map_start_data_field, buffer(pos, 3)); pos = pos + 3
 		end
-		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	end
 
 	return pos
@@ -530,13 +526,11 @@ function dissect_opcode_f3(buffer, pinfo, tree)
 
 	t:add(unknown_field, buffer(pos, length)); pos = pos + length
 
-	if buffer_length - pos < 2 then
+	if buffer_length - pos < 0 then
 		t:add_proto_expert_info(opcode_buffer_underrun_expert)
 		t:add(unknown_field, buffer(pos))
 		return buffer_length
 	end
-
-	t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 
 	return pos
 end
@@ -558,6 +552,8 @@ function dissect_player_name(buffer, pinfo, tree)
 		t:add(unknown_field, buffer(pos))
 		return buffer_length
 	end
+
+	t:add(unknown_field, buffer(pos, 2)); pos = pos + 2
 
 	return pos
 end
@@ -593,8 +589,6 @@ function dissect_send_message(buffer, pinfo, tree)
 		return buffer_length
 	end
 
-	t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
-
 	return pos
 end
 
@@ -605,7 +599,7 @@ function dissect_opcode_ff(buffer, pinfo, tree)
 	local pos = 0
 	local t = tree:add(opcode_field, buffer(pos, 1)); pos = pos + 1
 
-	if buffer_length >= 22 then
+	if buffer_length >= 20 then
 		t:add(unknown_field, buffer(pos, 1)); pos = pos + 1
 		t:add(address_length_field, buffer(pos, 1)); pos = pos + 1
 
@@ -626,8 +620,6 @@ function dissect_opcode_ff(buffer, pinfo, tree)
 		local downstream_address = string.format("%s:%d", downstream_ip, downstream_port)
 		t:add(downstream_address_field, buffer(pos, 6), downstream_address); pos = pos + 6
 		t:append_text(string.format(", Downstream: %s", downstream_address))
-
-		t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 	else
 		t:add_proto_expert_info(opcode_buffer_underrun_expert)
 		t:add(unknown_field, buffer(pos)); pos = buffer_length
@@ -657,12 +649,12 @@ function dissect_block(buffer, pinfo, tree)
 	local pos = 0
 	while pos < buffer_length do
 		local block_length = bit.band(buffer(pos, 1):uint(), 0x7f) + 1
-		local block_end = pos + block_length
+		local block_end = pos + block_length - 2
 		local t = tree:add(block_field, buffer(pos, block_length + 1), block_length); pos = pos + 1
 
 		if (block_length < 4) then
 			t:add(unknown_field, buffer(pos))
-			pos = block_end + 1
+			pos = block_end + 3
 		else
 			if pos + block_length <= buffer_length then
 				if block_length >= 3 then
@@ -679,7 +671,7 @@ function dissect_block(buffer, pinfo, tree)
 				end
 			end
 
-			local remaining = block_length - 3
+			local remaining = block_length - 5
 			while remaining > 0 do
 				local opcode = buffer(pos, 1):uint()
 
@@ -699,6 +691,8 @@ function dissect_block(buffer, pinfo, tree)
 					remaining = remaining - dissected
 				end
 			end
+
+			t:add(checksum_field, buffer(pos, 2)); pos = pos + 2
 		end
 	end
 

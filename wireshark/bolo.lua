@@ -687,20 +687,21 @@ function dissect_block(buffer, pinfo, tree)
 	t:append_text(string.format(", Sequence: 0x%02x", sequence))
 	t:add(sequence_field, buffer(pos, 1)); pos = pos + 1
 
-	local sender = bit.band(buffer(pos, 1):uint(), 0x0f)
+	local sender_flags = buffer(pos, 1):uint()
+	local sender = bit.band(sender_flags, 0x0f)
 	t:append_text(string.format(", Sender: 0x%02x", sender))
 	t:add(sender_flags_field, buffer(pos, 1))
 	t:add(sender_field, buffer(pos, 1)); pos = pos + 1
 
-	local flags = buffer(pos, 1):uint()
+	local block_flags = buffer(pos, 1):uint()
 	t:add(block_flags_field, buffer(pos, 1)); pos = pos + 1
 
 	-- pos should be 4 at this point
-	if bit.band(flags, 0x80) ~= 0 then
+	if bit.band(block_flags, 0x80) ~= 0 then
 		t:add(unknown_field, buffer(pos, 9 - pos))
 		pos = 9
 	end
-	if bit.band(sender, 0xe0) ~= 0 then
+	if bit.band(sender_flags, 0xe0) ~= 0 then
 		t:add(unknown_field, buffer(pos, 3))
 		pos = pos + 3
 	end

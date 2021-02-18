@@ -37,7 +37,7 @@ func UdpListener(port int, dataChannel chan proxy.UdpPacket, controlChannel chan
 		}
 	}()
 
-	fmt.Println("Listening on port", port)
+	fmt.Println("Listening on UDP port", port)
 
 	for {
 		n, addr, err := connection.ReadFromUDP(buffer)
@@ -45,7 +45,7 @@ func UdpListener(port int, dataChannel chan proxy.UdpPacket, controlChannel chan
 			if !strings.HasSuffix(err.Error(), "use of closed network connection") {
 				fmt.Println(err)
 			}
-			fmt.Println("Stopped listening on port", port)
+			fmt.Println("Stopped listening on UDP port", port)
 			break
 		}
 

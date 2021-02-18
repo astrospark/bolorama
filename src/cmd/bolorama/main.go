@@ -42,10 +42,13 @@ func main() {
 	const boloPort = 50000
 	gameIDRouteTableMap := make(map[[8]byte][]proxy.Route)
 	rxChannel := make(chan proxy.UdpPacket)
-	trackerControlChannel := make(chan int)
+	udpTrackerControlChannel := make(chan int)
+	tcpTrackerControlChannel := make(chan int)
+	gameInfoChannel := make(chan bolo.GameInfo)
 	proxyIP := getOutboundIP()
 
-	go tracker.UdpListener(trackerPort, rxChannel, trackerControlChannel)
+	go tracker.UdpListener(trackerPort, rxChannel, udpTrackerControlChannel)
+	go tracker.Tracker(proxyIP, trackerPort, gameInfoChannel, tcpTrackerControlChannel)
 
 	for {
 		data := <-rxChannel
@@ -65,6 +68,7 @@ func main() {
 
 			bolo.RewritePacketGameInfo(data.Buffer, proxyIP)
 			gameInfo := bolo.ParsePacketGameInfo(data.Buffer)
+			gameInfoChannel <- gameInfo
 			bolo.PrintGameInfo(gameInfo)
 
 			_, ok := gameIDRouteTableMap[gameInfo.GameID]

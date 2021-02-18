@@ -711,6 +711,7 @@ function dissect_block(buffer, pinfo, tree)
 
 		local offset = 0
 		if opcode == 0xff then
+			t:add(opcode_field, buffer(pos, 1))
 			pos = pos + 1
 			opcode = buffer(pos, 1):uint()
 			offset = 0x20

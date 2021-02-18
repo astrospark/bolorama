@@ -71,6 +71,10 @@ func main() {
 			gameInfoChannel <- gameInfo
 			bolo.PrintGameInfo(gameInfo)
 
+			// TODO: check if this player address+port is in any
+			// other game. if so, remove it from that game before
+			// creating new game.
+
 			_, ok := gameIDRouteTableMap[gameInfo.GameID]
 			if !ok {
 				playerRoute := proxy.AddPlayer(data.SrcAddr, rxChannel)
@@ -102,7 +106,7 @@ func main() {
 				printRouteTable(gameIDRouteTableMap)
 			}
 
-			bolo.RewritePacket(data, srcRoute, proxyIP)
+			bolo.RewritePacket(data.Buffer, proxyIP, srcRoute.ProxyPort)
 
 			if bytes.Contains(data.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
 				fmt.Println()

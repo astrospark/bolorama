@@ -41,9 +41,15 @@ const PacketType9PeerPortOffset = 12
 
 const MinesVisibleBitmask = 1 << 6
 
-const OpcodeMapData = 0xf1
-const OpcodePlayerInfo = 0xff
-const OpcodeMapDataSubcode01 = 0x01
+const OpcodeGameInfo = 0x11
+const OpcodeMapData = 0x13
+const OpcodePlayerName = 0x18
+const OpcodeSendMessage = 0x1a
+const OpcodeDisconnect = 0x30
+const OpcodeGameInfoSubcodeGame = 0x01
+const OpcodeGameInfoSubcodePillbox = 0x02
+const OpcodeGameInfoSubcodeBase = 0x03
+const OpcodeGameInfoSubcodeStart = 0x04
 
 /* Macs count time since Midnight, 1st Jan 1904. Unix counts from 1970.
    This value adjusts for the 66 years and 17 leap-days difference. */
@@ -63,6 +69,17 @@ type GameInfo struct {
 	NeutralPillboxCount uint16
 	NeutralBaseCount    uint16
 	HasPassword         bool
+}
+
+var opcodeLengthLookup = []int{
+	4, 6, 8, 10, 4, 1, 3, 3,
+	1, 1, 1, 1, 1, 1, 1, 1,
+	2, 0, 3, 0, 2, 3, 1, 1,
+	0, 2, 0, 4, 2, 1, 1, 3,
+	1, 1, 1, 1, 1, 3, 1, 1,
+	3, 1, 1, 1, 1, 1, 1, 1,
+	0, 1, 3, 3, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1,
 }
 
 func verifyBoloSignature(msg []byte) bool {
@@ -198,55 +215,117 @@ func rewriteOpcodeGameInfo(pos int, buffer []byte, proxyPort int, proxyIP net.IP
 	buffer[pos+3] = proxyIP[3]
 }
 
-func rewriteGameStateBlock(posStart int, buffer []byte, proxyPort int, proxyIP net.IP) int {
+// parseOpcode returns the opcode and the length (including the opcode byte(s))
+func parseOpcode(pos int, buffer []byte) (int, int) {
+	opcode := int(buffer[pos])
+	pos = pos + 1
+	offset := 0
+
+	if opcode == 0xff {
+		opcode = int(buffer[pos])
+		pos = pos + 1
+		offset = 0x20
+	}
+
+	if opcode < 0xf0 {
+		opcode = opcode >> 4
+	} else {
+		opcode = opcode & 0x1f
+	}
+
+	opcode = opcode + offset
+	opcodeLength := 0
+
+	switch opcode {
+	case OpcodeDisconnect:
+		addressLength := int(buffer[pos])
+		opcodeLength = (addressLength * 3) + 2
+	case OpcodeGameInfo:
+		subcode := int(buffer[pos])
+		count := int(buffer[pos+1])
+
+		switch subcode {
+		case OpcodeGameInfoSubcodeGame:
+			opcodeLength = 90
+		case OpcodeGameInfoSubcodePillbox:
+			opcodeLength = (count * 5) + 3
+		case OpcodeGameInfoSubcodeBase:
+			opcodeLength = (count * 6) + 3
+		case OpcodeGameInfoSubcodeStart:
+			opcodeLength = (count * 3) + 3
+		default:
+			opcodeLength = 42
+		}
+	case OpcodeMapData:
+		mapDataLength := int(buffer[pos+2])
+		opcodeLength = mapDataLength + 3
+	case OpcodePlayerName:
+		playerNameLength := int(buffer[pos])
+		opcodeLength = playerNameLength + 2
+	case OpcodeSendMessage:
+		messageLength := int(buffer[pos+2])
+		opcodeLength = messageLength + 4
+	default:
+		opcodeLength = opcodeLengthLookup[opcode]
+	}
+
+	return opcode, opcodeLength
+}
+
+func rewriteGameStateBlock(packetSequence int, posStart int, buffer []byte, proxyPort int, proxyIP net.IP) int {
 	// block length includes length byte, does not include checksum
 	blockLength := int(buffer[posStart] & 0x7f)
 	posBlockStart := posStart + 1
 	posChecksum := posStart + blockLength
 	posNextBlock := posChecksum + 2
-
-	//nextBlockPos := pos + blockLength
-	//endPos := nextBlockPos - 1
+	rewriteCrc := false
 
 	if blockLength < 4 {
-		if blockLength == 0 && len(buffer)-posStart == 6 {
-			if buffer[posStart] == 0x00 && buffer[posStart+2] == 0x00 {
-				// don't know what this is, but know about it
-				posNextBlock = posStart + 6
-			}
+		if blockLength == 0 {
+			// don't know what this is, can't continue parsing
+			posNextBlock = len(buffer) // skip to end
 		}
 		return posNextBlock
 	}
 
-	pos := posBlockStart + 3 // skip sequence, sender + flags, unknown byte
-
-	// sometimes we overrun the buffer here
-	if pos >= len(buffer) {
-		fmt.Printf("Warning: buffer overrun (pos = %d, len(buffer) = %d)\n", pos, len(buffer))
-		fmt.Println(hex.Dump(buffer))
-		return posNextBlock
-	}
-
-	opcode := int(buffer[pos])
+	//blockSequence := buffer[posBlockStart]
+	pos := posBlockStart + 1 // skip sequence
+	senderFlags := buffer[pos] & 0xf0
+	pos = pos + 1
+	flags := buffer[pos]
 	pos = pos + 1
 
-	// TODO: it's possible for blocks to contain multiple opcodes
+	if flags&0x80 > 0 {
+		pos = pos + 5
+	}
 
-	rewriteCrc := false
-	switch opcode {
-	case OpcodeMapData:
-		subcode := int(buffer[pos])
-		pos = pos + 1
+	if senderFlags&0xe0 > 0 {
+		pos = pos + 3
+	}
 
-		if subcode == OpcodeMapDataSubcode01 {
-			rewriteOpcodeGameInfo(pos, buffer, proxyPort, proxyIP)
+	for pos < posChecksum {
+		opcode, opcodeLength := parseOpcode(pos, buffer)
+
+		/*
+			fmt.Printf("PacketLength: %d PacketSequence: 0x%02x BlockSequence: 0x%02x BlockLength: %d RawOpcode: 0x%02x Opcode: 0x%02x OpcodeLength: %d\n",
+				len(buffer), packetSequence, blockSequence, blockLength, buffer[pos], opcode, opcodeLength)
+		*/
+
+		switch opcode {
+		case OpcodeGameInfo:
+			subcode := int(buffer[pos+1])
+			//pos = pos + 1
+
+			if subcode == OpcodeGameInfoSubcodeGame {
+				rewriteOpcodeGameInfo(pos+2, buffer, proxyPort, proxyIP)
+				rewriteCrc = true
+			}
+		case OpcodeDisconnect:
+			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP)
 			rewriteCrc = true
 		}
-	case OpcodePlayerInfo:
-		if buffer[pos] == 0xf0 && blockLength == 26 {
-			rewriteOpcodePlayerInfo(pos, buffer, proxyPort, proxyIP)
-			rewriteCrc = true
-		}
+
+		pos = pos + opcodeLength
 	}
 
 	if rewriteCrc {
@@ -257,46 +336,54 @@ func rewriteGameStateBlock(posStart int, buffer []byte, proxyPort int, proxyIP n
 	return posNextBlock
 }
 
-func rewritePacketGameState(buffer []byte, proxyPort int, proxyIP net.IP) {
+func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int) {
 	pos := PacketHeaderSize
+	packetSequence := int(buffer[pos])
 	pos = pos + 1 // skip state sequence
 
 	for pos < len(buffer) {
-		pos = rewriteGameStateBlock(pos, buffer, proxyPort, proxyIP)
+		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP)
 	}
 }
 
-func rewritePacketFixedPosition(packet proxy.UdpPacket, proxyPort int, proxyIP net.IP, offset int) {
-	packetIP := packet.Buffer[offset : offset+4]
+func rewritePacketFixedPosition(buffer []byte, proxyIP net.IP, proxyPort int, offset int) {
+	packetIP := buffer[offset : offset+4]
 	if !bytes.Equal(packetIP, proxyIP) {
 		port := make([]byte, 2)
 		binary.BigEndian.PutUint16(port, uint16(proxyPort))
-		packet.Buffer[offset+0] = proxyIP[0]
-		packet.Buffer[offset+1] = proxyIP[1]
-		packet.Buffer[offset+2] = proxyIP[2]
-		packet.Buffer[offset+3] = proxyIP[3]
-		packet.Buffer[offset+4] = port[0]
-		packet.Buffer[offset+5] = port[1]
+		buffer[offset+0] = proxyIP[0]
+		buffer[offset+1] = proxyIP[1]
+		buffer[offset+2] = proxyIP[2]
+		buffer[offset+3] = proxyIP[3]
+		buffer[offset+4] = port[0]
+		buffer[offset+5] = port[1]
 	}
 }
 
-func RewritePacket(packet proxy.UdpPacket, srcRoute proxy.Route, proxyIP net.IP) {
+func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int) {
 	// only the player who starts the game will send packets with the wrong ip address, and it will
 	// be their own. so we can search for any ip that isn't ours, replace it with ours, and replace
 	// the port with the player's assigned port
 
-	switch packet.Buffer[PacketTypeOffset] {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+			fmt.Println(hex.Dump(buffer))
+		}
+	}()
+
+	switch buffer[PacketTypeOffset] {
 	case PacketType0:
-		rewritePacketFixedPosition(packet, srcRoute.ProxyPort, proxyIP, PacketType0PeerAddrOffset)
+		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType0PeerAddrOffset)
 	case PacketType1:
-		rewritePacketFixedPosition(packet, srcRoute.ProxyPort, proxyIP, PacketType1PeerAddrOffset)
+		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType1PeerAddrOffset)
 	case PacketTypeGameState:
-		rewritePacketGameState(packet.Buffer, srcRoute.ProxyPort, proxyIP)
+		rewritePacketGameState(buffer, proxyIP, proxyPort)
 	case PacketType6:
-		rewritePacketFixedPosition(packet, srcRoute.ProxyPort, proxyIP, PacketType6PeerAddrOffset)
+		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType6PeerAddrOffset)
 	case PacketType7:
-		rewritePacketFixedPosition(packet, srcRoute.ProxyPort, proxyIP, PacketType7PeerAddrOffset)
+		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType7PeerAddrOffset)
 	case PacketType9:
-		rewritePacketFixedPosition(packet, srcRoute.ProxyPort, proxyIP, PacketType9PeerAddrOffset)
+		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType9PeerAddrOffset)
 	}
 }

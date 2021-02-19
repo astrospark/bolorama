@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 
 	"git.astrospark.com/bolorama/proxy"
 )
@@ -12,7 +13,9 @@ import (
 // "safe" is defined as “guaranteed to be able to be reassembled, if fragmented."
 const bufferSize = 1024
 
-func UdpListener(port int, dataChannel chan proxy.UdpPacket, controlChannel chan int) {
+func UdpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, port int, dataChannel chan proxy.UdpPacket) {
+	defer wg.Done()
+
 	listenAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprint(":", port))
 	if err != nil {
 		fmt.Println(err)
@@ -30,9 +33,10 @@ func UdpListener(port int, dataChannel chan proxy.UdpPacket, controlChannel chan
 
 	go func() {
 		for {
-			stopPort := <-controlChannel
-			if stopPort == port {
+			_, ok := <-shutdownChannel
+			if !ok {
 				connection.Close()
+				break
 			}
 		}
 	}()

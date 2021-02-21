@@ -128,6 +128,10 @@ func DeleteRoute(routes []Route, remove Route) []Route {
 }
 
 func AddPlayer(wg *sync.WaitGroup, shutdownChannel chan struct{}, srcAddr net.UDPAddr, rxChannel chan UdpPacket) Route {
+	if len(assignedPlayerPorts) > 1000 {
+		// TODO this allows someone to deny service
+		panic("maximum players exceeded (1000)")
+	}
 	nextPlayerPort := getNextAvailablePort(firstPlayerPort, &assignedPlayerPorts)
 	playerRoute := newPlayerRoute(srcAddr, nextPlayerPort, rxChannel)
 	createPlayerProxy(wg, shutdownChannel, playerRoute)

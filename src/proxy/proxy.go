@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -15,11 +16,12 @@ const bufferSize = 1024
 
 // Route associates a proxy port with a player's real IP address + port
 type Route struct {
-	PlayerIPAddr net.UDPAddr
-	ProxyPort    int
-	Connection   *net.UDPConn
-	RxChannel    chan UdpPacket
-	TxChannel    chan UdpPacket
+	PlayerIPAddr      net.UDPAddr
+	ProxyPort         int
+	Connection        *net.UDPConn
+	RxChannel         chan UdpPacket
+	TxChannel         chan UdpPacket
+	DisconnectChannel chan struct{}
 }
 
 // UdpPacket represents a packet being sent from srcAddr to dstAddr
@@ -70,40 +72,71 @@ func getNextAvailablePort(firstPort int, assignedPorts *[]int) int {
 	return nextPort
 }
 
-func GetRouteByAddr(gameIDRouteTableMap map[[8]byte][]Route, addr net.UDPAddr) (Route, error) {
-	for _, routes := range gameIDRouteTableMap {
-		for _, route := range routes {
-			if addr.IP.Equal(route.PlayerIPAddr.IP) && addr.Port == route.PlayerIPAddr.Port {
-				return route, nil
-			}
+func deletePort(port int) {
+	idx := -1
+	for i, value := range assignedPlayerPorts {
+		if value == port {
+			idx = i
+			break
 		}
 	}
 
-	return Route{}, fmt.Errorf("Error: Socket %s:%d not found in routing tables",
+	if idx >= 0 {
+		copy(assignedPlayerPorts[idx:], assignedPlayerPorts[idx+1:])
+		assignedPlayerPorts = assignedPlayerPorts[:len(assignedPlayerPorts)-1]
+	}
+}
+
+func GetRouteByAddr(routes []Route, addr net.UDPAddr) (Route, error) {
+	for _, route := range routes {
+		if addr.IP.Equal(route.PlayerIPAddr.IP) && addr.Port == route.PlayerIPAddr.Port {
+			return route, nil
+		}
+	}
+
+	return Route{}, fmt.Errorf("Error: Socket %s:%d not found in route table",
 		addr.IP.String(), addr.Port)
 }
 
-func GetRouteByPort(gameIDRouteTableMap map[[8]byte][]Route, port int) ([8]byte, Route, error) {
-	for gameID, routes := range gameIDRouteTableMap {
-		for _, route := range routes {
-			if port == route.ProxyPort {
-				return gameID, route, nil
-			}
+func GetRouteByPort(routes []Route, port int) (Route, error) {
+	for _, route := range routes {
+		if port == route.ProxyPort {
+			return route, nil
 		}
 	}
 
-	return [8]byte{}, Route{}, fmt.Errorf("Error: Port %d not found in routing tables", port)
+	return Route{}, fmt.Errorf("Error: Port %d not found in route tables", port)
 }
 
-func AddPlayer(wg *sync.WaitGroup, controlChannel chan int, srcAddr net.UDPAddr, rxChannel chan UdpPacket) Route {
+func DeleteRoute(routes []Route, remove Route) []Route {
+	remove_idx := -1
+	for i, route := range routes {
+		if bytes.Equal(route.PlayerIPAddr.IP, remove.PlayerIPAddr.IP) && route.ProxyPort == remove.ProxyPort {
+			remove_idx = i
+			break
+		}
+	}
+
+	if remove_idx >= 0 {
+		routes[remove_idx] = routes[len(routes)-1]
+		routes[len(routes)-1] = Route{}
+		routes = routes[:len(routes)-1]
+		deletePort(remove.ProxyPort)
+	}
+
+	return routes
+}
+
+func AddPlayer(wg *sync.WaitGroup, shutdownChannel chan struct{}, srcAddr net.UDPAddr, rxChannel chan UdpPacket) Route {
 	nextPlayerPort := getNextAvailablePort(firstPlayerPort, &assignedPlayerPorts)
 	playerRoute := newPlayerRoute(srcAddr, nextPlayerPort, rxChannel)
-	createPlayerProxy(wg, controlChannel, playerRoute)
+	createPlayerProxy(wg, shutdownChannel, playerRoute)
 	return playerRoute
 }
 
 func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket) Route {
 	txChannel := make(chan UdpPacket)
+	disconnectChannel := make(chan struct{})
 
 	return Route{
 		addr,
@@ -111,10 +144,11 @@ func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket) Route 
 		nil,
 		rxChannel,
 		txChannel,
+		disconnectChannel,
 	}
 }
 
-func createPlayerProxy(wg *sync.WaitGroup, controlChannel chan int, playerRoute Route) {
+func createPlayerProxy(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerRoute Route) {
 	fmt.Println()
 	fmt.Printf("Creating proxy: %d => %s:%d\n", playerRoute.ProxyPort,
 		playerRoute.PlayerIPAddr.IP.String(), playerRoute.PlayerIPAddr.Port)
@@ -134,23 +168,27 @@ func createPlayerProxy(wg *sync.WaitGroup, controlChannel chan int, playerRoute 
 	playerRoute.Connection = connection
 
 	wg.Add(2)
-	go udpListener(wg, controlChannel, playerRoute)
-	go udpTransmitter(wg, controlChannel, playerRoute)
+	go udpListener(wg, shutdownChannel, playerRoute)
+	go udpTransmitter(wg, shutdownChannel, playerRoute)
 }
 
-func udpListener(wg *sync.WaitGroup, controlChannel chan int, playerRoute Route) {
-	buffer := make([]byte, bufferSize)
-
+func udpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerRoute Route) {
 	defer wg.Done()
+	buffer := make([]byte, bufferSize)
 
 	go func() {
 		for {
-			port, ok := <-controlChannel
-			if port == playerRoute.ProxyPort || !ok {
-				playerRoute.Connection.Close()
-			}
-			if !ok {
-				break
+			select {
+			case _, ok := <-playerRoute.DisconnectChannel:
+				if !ok {
+					playerRoute.Connection.Close()
+					break
+				}
+			case _, ok := <-shutdownChannel:
+				if !ok {
+					playerRoute.Connection.Close()
+					break
+				}
 			}
 		}
 	}()
@@ -171,7 +209,7 @@ func udpListener(wg *sync.WaitGroup, controlChannel chan int, playerRoute Route)
 	}
 }
 
-func udpTransmitter(wg *sync.WaitGroup, controlChannel chan int, playerRoute Route) {
+func udpTransmitter(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerRoute Route) {
 	defer wg.Done()
 	defer func() {
 		fmt.Println("Stopped transmitting on UDP port", playerRoute.ProxyPort)
@@ -179,8 +217,12 @@ func udpTransmitter(wg *sync.WaitGroup, controlChannel chan int, playerRoute Rou
 
 	for {
 		select {
-		case port, ok := <-controlChannel:
-			if port == playerRoute.ProxyPort || !ok {
+		case _, ok := <-playerRoute.DisconnectChannel:
+			if !ok {
+				return
+			}
+		case _, ok := <-shutdownChannel:
+			if !ok {
 				return
 			}
 		case data := <-playerRoute.TxChannel:

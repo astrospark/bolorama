@@ -2,8 +2,9 @@ package tracker
 
 import (
 	"fmt"
-	"net"
+	"sort"
 	"strings"
+	"time"
 
 	"git.astrospark.com/bolorama/bolo"
 )
@@ -19,7 +20,7 @@ var gameTypeName = map[int]string{
 	3: "Strict Tournament",
 }
 
-func getTrackerText(proxyIP net.IP, gameInfo bolo.GameInfo) string {
+func getTrackerText(hostname string, gameState GameState) string {
 	var sb strings.Builder
 
 	sb.WriteString("= =================================================================== =\r")
@@ -27,22 +28,42 @@ func getTrackerText(proxyIP net.IP, gameInfo bolo.GameInfo) string {
 	sb.WriteString("=                         Astrospark Bolorama                         =\r")
 	sb.WriteString("=                                                                     =\r")
 	sb.WriteString("= =================================================================== =\r")
+	sb.WriteString("\r")
 
-	if gameInfo != (bolo.GameInfo{}) {
-		sb.WriteString(getGameInfoText(proxyIP, gameInfo))
+	var games []bolo.GameInfo
+	for _, game := range gameState.mapGameIdGameInfo {
+		games = append(games, game)
+	}
+	sort.Slice(games, func(i, j int) bool {
+		return games[i].ServerStartTimestamp.After(games[j].ServerStartTimestamp)
+	})
 
-		sb.WriteString(fmt.Sprintf("\r\r   There is 1 game in progress.\r"))
+	if len(games) == 0 {
+		sb.WriteString("   There are no games in progress.\r\r")
+		return sb.String()
+	}
+
+	for _, game := range games {
+		ports := getGamePorts(gameState, game.GameId)
+		players := getPlayers(gameState, ports)
+		sort.Ints(ports)
+		sb.WriteString(getGameInfoText(hostname, ports[0], game, players))
+		sb.WriteString("\r")
+	}
+
+	if len(games) == 1 {
+		sb.WriteString("   There is 1 game in progress.\r\r")
 	} else {
-		sb.WriteString(fmt.Sprintf("\r\r   There are no games in progress.\r"))
+		sb.WriteString(fmt.Sprintf("   There are %d games in progress.\r\r", len(games)))
 	}
 
 	return sb.String()
 }
 
-func getGameInfoText(proxyIP net.IP, gameInfo bolo.GameInfo) string {
+func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, players []string) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("\rHost: %s", proxyIP))
+	sb.WriteString(fmt.Sprintf("\rHost: %s", hostname))
 	// sb.WriteString(fmt.Sprintf("\r {%d}", port))
 	sb.WriteString(fmt.Sprintf("  Players: %d", gameInfo.PlayerCount))
 	sb.WriteString(fmt.Sprintf("  Bases: %d", gameInfo.NeutralBaseCount))
@@ -55,10 +76,40 @@ func getGameInfoText(proxyIP net.IP, gameInfo bolo.GameInfo) string {
 	sb.WriteString(fmt.Sprintf("  PW: %s\r", yesNo[gameInfo.HasPassword]))
 
 	sb.WriteString(fmt.Sprintf("Version: 0.99.7"))
-	// sb.WriteString(fmt.Sprintf("  Tracked-For: - min."))
-	// sb.WriteString(fmt.Sprintf("  Player-List:\r"))
+	sb.WriteString(fmt.Sprintf("  Tracked-For: %d minutes", gameDuration(gameInfo)))
+	sb.WriteString(fmt.Sprintf("  Player-List:\r"))
+
+	playersText := strings.Join(players, ", ")
+	sb.WriteString(fmt.Sprintf("   %s\r", playersText))
 
 	// sb.WriteString(fmt.Sprintf("   -\r"))
 
 	return sb.String()
+}
+
+func getGamePorts(gameState GameState, targetGameId bolo.GameId) []int {
+	var ports []int
+	for port, gameId := range gameState.mapProxyPortGameId {
+		if gameId == targetGameId {
+			ports = append(ports, port)
+		}
+	}
+	return ports
+}
+
+func getPlayers(gameState GameState, ports []int) []string {
+	var players []string
+	for _, port := range ports {
+		name, ok := gameState.mapProxyPortPlayerName[port]
+		if !ok {
+			name = "<<unknown>>"
+		}
+		players = append(players, name)
+	}
+	return players
+}
+
+func gameDuration(gameInfo bolo.GameInfo) int {
+	duration := time.Now().Sub(gameInfo.ServerStartTimestamp)
+	return int(duration.Minutes())
 }

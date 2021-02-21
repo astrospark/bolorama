@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"runtime/debug"
 	"time"
 
 	"git.astrospark.com/bolorama/proxy"
@@ -55,20 +54,23 @@ const OpcodeGameInfoSubcodeStart = 0x04
    This value adjusts for the 66 years and 17 leap-days difference. */
 const seconds1904ToUnixEpoch = (((1970-1904)*365 + 17) * 24 * 60 * 60)
 
+type GameId [8]byte
+
 type GameInfo struct {
-	GameID              [8]byte
-	MapName             string
-	StartTimestamp      uint32
-	GameType            int
-	AllowHiddenMines    bool
-	AllowComputer       bool
-	ComputerAdvantage   bool
-	StartDelay          uint32
-	TimeLimit           uint32
-	PlayerCount         uint16
-	NeutralPillboxCount uint16
-	NeutralBaseCount    uint16
-	HasPassword         bool
+	GameId               GameId
+	ServerStartTimestamp time.Time
+	MapName              string
+	StartTimestamp       uint32
+	GameType             int
+	AllowHiddenMines     bool
+	AllowComputer        bool
+	ComputerAdvantage    bool
+	StartDelay           uint32
+	TimeLimit            uint32
+	PlayerCount          uint16
+	NeutralPillboxCount  uint16
+	NeutralBaseCount     uint16
+	HasPassword          bool
 }
 
 var opcodeLengthLookup = []int{
@@ -126,7 +128,7 @@ func ParsePacketGameInfo(msg []byte) GameInfo {
 	gameInfo.MapName = string(msg[pos+1 : pos+1+int(msg[pos])])
 	pos = pos + 36
 
-	copy(gameInfo.GameID[:], msg[pos:pos+8])
+	copy(gameInfo.GameId[:], msg[pos:pos+8])
 
 	// skip host ip
 	pos = pos + 4
@@ -169,7 +171,7 @@ func ParsePacketGameInfo(msg []byte) GameInfo {
 
 func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println()
-	fmt.Println("Game ID:", gameInfo.GameID)
+	fmt.Println("Game Id:", gameInfo.GameId)
 	fmt.Println("Map Name:", gameInfo.MapName)
 	fmt.Println("Start Timestamp:", time.Unix(int64(gameInfo.StartTimestamp-seconds1904ToUnixEpoch), 0))
 	fmt.Println("Game Type:", gameInfo.GameType)
@@ -184,23 +186,32 @@ func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println("Password:", gameInfo.HasPassword)
 }
 
-func rewriteOpcodePlayerInfo(pos int, buffer []byte, proxyPort int, proxyIP net.IP) {
-	// skip unknown byte, address length, first address
-	pos = pos + 8
+func rewriteOpcodePlayerInfo(
+	pos int,
+	buffer []byte,
+	proxyPort int,
+	proxyIP net.IP,
+	srcRoute proxy.Route,
+	leaveGameChannel chan proxy.Route,
+) {
+	// skip address length, first address
+	pos = pos + 7
 
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println(hex.Dump(buffer))
-			fmt.Println("panic occurred:", err)
-			debug.PrintStack()
-		}
-	}()
+	playerPort := binary.BigEndian.Uint16(buffer[pos+4 : pos+6])
+	fmt.Printf("Player disconnecting %d.%d.%d.%d:%d\n", buffer[pos+0], buffer[pos+1], buffer[pos+2], buffer[pos+3], playerPort)
+	//if bytes.Equal(srcRoute.PlayerIPAddr.IP, buffer[pos:pos+4]) && int(playerPort) == srcRoute.PlayerIPAddr.Port {
+	if !bytes.Equal(buffer[pos:pos+4], proxyIP) {
+		fmt.Println("Sending LeaveGame event")
+		leaveGameChannel <- srcRoute
+	}
 
-	buffer[pos+0] = proxyIP[0]
-	buffer[pos+1] = proxyIP[1]
-	buffer[pos+2] = proxyIP[2]
-	buffer[pos+3] = proxyIP[3]
-	binary.BigEndian.PutUint16(buffer[pos+4:pos+6], uint16(proxyPort))
+	if !bytes.Equal(proxyIP, buffer[pos:pos+4]) {
+		buffer[pos+0] = proxyIP[0]
+		buffer[pos+1] = proxyIP[1]
+		buffer[pos+2] = proxyIP[2]
+		buffer[pos+3] = proxyIP[3]
+		binary.BigEndian.PutUint16(buffer[pos+4:pos+6], uint16(proxyPort))
+	}
 }
 
 func rewriteOpcodeGameInfo(pos int, buffer []byte, proxyPort int, proxyIP net.IP) {
@@ -272,7 +283,15 @@ func parseOpcode(pos int, buffer []byte) (int, int) {
 	return opcode, opcodeLength
 }
 
-func rewriteGameStateBlock(packetSequence int, posStart int, buffer []byte, proxyPort int, proxyIP net.IP) int {
+func rewriteGameStateBlock(
+	packetSequence int,
+	posStart int,
+	buffer []byte,
+	proxyPort int,
+	proxyIP net.IP,
+	srcRoute proxy.Route,
+	leaveGameChannel chan proxy.Route,
+) int {
 	// block length includes length byte, does not include checksum
 	blockLength := int(buffer[posStart] & 0x7f)
 	posBlockStart := posStart + 1
@@ -321,7 +340,7 @@ func rewriteGameStateBlock(packetSequence int, posStart int, buffer []byte, prox
 				rewriteCrc = true
 			}
 		case OpcodeDisconnect:
-			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP)
+			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP, srcRoute, leaveGameChannel)
 			rewriteCrc = true
 		}
 
@@ -336,13 +355,13 @@ func rewriteGameStateBlock(packetSequence int, posStart int, buffer []byte, prox
 	return posNextBlock
 }
 
-func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int) {
+func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int, srcRoute proxy.Route, leaveGameChannel chan proxy.Route) {
 	pos := PacketHeaderSize
 	packetSequence := int(buffer[pos])
 	pos = pos + 1 // skip state sequence
 
 	for pos < len(buffer) {
-		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP)
+		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP, srcRoute, leaveGameChannel)
 	}
 }
 
@@ -360,7 +379,7 @@ func rewritePacketFixedPosition(buffer []byte, proxyIP net.IP, proxyPort int, of
 	}
 }
 
-func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int) {
+func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcRoute proxy.Route, leaveGameChannel chan proxy.Route) {
 	// only the player who starts the game will send packets with the wrong ip address, and it will
 	// be their own. so we can search for any ip that isn't ours, replace it with ours, and replace
 	// the port with the player's assigned port
@@ -378,7 +397,7 @@ func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int) {
 	case PacketType1:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType1PeerAddrOffset)
 	case PacketTypeGameState:
-		rewritePacketGameState(buffer, proxyIP, proxyPort)
+		rewritePacketGameState(buffer, proxyIP, proxyPort, srcRoute, leaveGameChannel)
 	case PacketType6:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType6PeerAddrOffset)
 	case PacketType7:

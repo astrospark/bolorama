@@ -6,32 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
-
-	"git.astrospark.com/bolorama/bolo"
 )
-
-func Tracker(wg *sync.WaitGroup, shutdownChannel chan struct{}, proxyIP net.IP, port int, gameInfoChannel chan bolo.GameInfo) {
-	tcpRequestChannel := make(chan net.Conn)
-	defer wg.Done()
-
-	wg.Add(1)
-	go tcpListener(wg, shutdownChannel, port, tcpRequestChannel)
-
-	var gameInfo bolo.GameInfo
-	for {
-		select {
-		case newGameInfo := <-gameInfoChannel:
-			gameInfo = newGameInfo
-		case conn := <-tcpRequestChannel:
-			conn.Write([]byte(getTrackerText(proxyIP, gameInfo)))
-			conn.Close()
-		case _, ok := <-shutdownChannel:
-			if !ok {
-				return
-			}
-		}
-	}
-}
 
 func tcpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, port int, tcpRequestChannel chan net.Conn) {
 	defer wg.Done()

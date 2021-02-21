@@ -19,6 +19,8 @@ packet_type_field = ProtoField.uint8("bolo.packet_type", "Packet Type", base.HEX
 -- Packet Type 0x02
 sequence_field = ProtoField.uint8("bolo.sequence", "Sequence", base.HEX)
 block_field = ProtoField.uint8("bolo.block", "Block", base.UNIT_STRING, {" byte", " bytes"})
+length_flag_field = ProtoField.uint8("bolo.length_flag", "Length Flag", base.HEX, nil, 0x80)
+block_length_field = ProtoField.uint8("bolo.block_length", "Block Length", base.HEX, nil, 0x7f)
 sender_flags_field = ProtoField.uint8("bolo.sender_flags", "Sender Flags", base.HEX, nil, 0xf0)
 sender_field = ProtoField.uint8("bolo.sender", "Sender", base.HEX, nil, 0x0f)
 block_flags_field = ProtoField.uint8("bolo.block_flags", "Block Flags", base.HEX)
@@ -85,7 +87,7 @@ bolo_protocol.fields = {
 	signature_field, version_field, packet_type_field,
 
 	-- Packet Type 0x02 Game State
-	sequence_field, block_field,
+	sequence_field, block_field, length_flag_field, block_length_field,
 	sender_flags_field, sender_field, block_flags_field,
 	opcode_field, subcode_field, checksum_field,
 	host_address_field,
@@ -674,6 +676,7 @@ function dissect_block(buffer, pinfo, tree)
 	local pos = 0
 
 	-- block_length includes length byte but not CRC
+	local length_flag = bit.band(buffer(pos, 1):uint(), 0x80)
 	local block_length = bit.band(buffer(pos, 1):uint(), 0x7f)
 
 	if (block_length < 4) then
@@ -681,7 +684,10 @@ function dissect_block(buffer, pinfo, tree)
 		return buffer_length
 	end
 
-	local t = tree:add(block_field, buffer(pos, block_length + 2), block_length); pos = pos + 1
+	local t = tree:add(block_field, buffer(pos, block_length + 2), block_length)
+	t:add(length_flag_field, buffer(pos, 1))
+	-- t:add(block_length_field, buffer(pos, 1)):append_text(string.format(" (%d)", block_length))
+	pos = pos + 1
 
 	local sequence = buffer(pos, 1):uint()
 	t:append_text(string.format(", Sequence: 0x%02x", sequence))

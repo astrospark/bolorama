@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sync"
@@ -33,10 +34,11 @@ type PlayerName struct {
 }
 
 type GameState struct {
-	routes                 []proxy.Route
-	mapGameIdGameInfo      map[bolo.GameId]bolo.GameInfo
-	mapProxyPortGameId     map[int]bolo.GameId
-	mapProxyPortPlayerName map[int]string
+	routes                      []proxy.Route
+	mapGameIdGameInfo           map[bolo.GameId]bolo.GameInfo
+	mapProxyPortGameId          map[int]bolo.GameId
+	mapProxyPortPlayerName      map[int]string
+	mapProxyPortPingStopChannel map[int]chan struct{}
 }
 
 func Tracker(
@@ -55,8 +57,10 @@ func Tracker(
 	proxyIp := util.GetOutboundIp()
 	gameState := initGameState()
 
+	udpConnection := connectUdp(port)
+
 	wg.Add(2)
-	go udpListener(wg, shutdownChannel, port, udpPacketChannel)
+	go udpListener(wg, shutdownChannel, udpConnection, port, udpPacketChannel)
 	go tcpListener(wg, shutdownChannel, port, tcpRequestChannel)
 
 	for {
@@ -69,6 +73,8 @@ func Tracker(
 			gameId := gameState.mapProxyPortGameId[leaveGameRoute.ProxyPort]
 			delete(gameState.mapProxyPortGameId, leaveGameRoute.ProxyPort)
 			delete(gameState.mapProxyPortPlayerName, leaveGameRoute.ProxyPort)
+			close(gameState.mapProxyPortPingStopChannel[leaveGameRoute.ProxyPort])
+			delete(gameState.mapProxyPortPingStopChannel, leaveGameRoute.ProxyPort)
 			gameState.routes = proxy.DeleteRoute(gameState.routes, leaveGameRoute)
 			playerCount := countGamePlayers(gameState, gameId)
 			if playerCount == 0 {
@@ -83,6 +89,9 @@ func Tracker(
 				playerCount := countGamePlayers(gameState, newRoute.GameId)
 				updatePlayerCount(gameState, newRoute.GameId, playerCount)
 			}
+			pingStopChannel := make(chan struct{})
+			gameState.mapProxyPortPingStopChannel[newRoute.PlayerRoute.ProxyPort] = pingStopChannel
+			go pingGameInfo(udpConnection, newRoute.PlayerRoute, pingStopChannel)
 		case joinGame := <-joinGameChannel:
 			gameId, ok := gameState.mapProxyPortGameId[joinGame.DstProxyPort]
 			if ok {
@@ -132,6 +141,25 @@ func handleGameInfoPacket(gameState GameState, gameStartChannel chan GameStart, 
 	fmt.Println()
 }
 
+func pingGameInfo(connection *net.UDPConn, route proxy.Route, stopChannel chan struct{}) {
+	gameInfoPingSeconds := config.GetValueInt("game_info_ping_seconds")
+	ticker := time.NewTicker(time.Duration(gameInfoPingSeconds) * time.Second)
+
+	for {
+		select {
+		case <-stopChannel:
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			buffer, err := hex.DecodeString("426f6c6f0099070d")
+			if err != nil {
+				break
+			}
+			connection.WriteToUDP(buffer, &route.PlayerIPAddr)
+		}
+	}
+}
+
 func countGamePlayers(gameState GameState, gameId bolo.GameId) int {
 	count := 0
 	for _, activeGameId := range gameState.mapProxyPortGameId {
@@ -170,5 +198,6 @@ func initGameState() GameState {
 	gameState.mapGameIdGameInfo = make(map[bolo.GameId]bolo.GameInfo)
 	gameState.mapProxyPortGameId = make(map[int]bolo.GameId)
 	gameState.mapProxyPortPlayerName = make(map[int]string)
+	gameState.mapProxyPortPingStopChannel = make(map[int]chan struct{})
 	return gameState
 }

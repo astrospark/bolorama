@@ -86,9 +86,7 @@ func Tracker(
 		case joinGame := <-joinGameChannel:
 			gameId, ok := gameState.mapProxyPortGameId[joinGame.DstProxyPort]
 			if ok {
-				gameState.mapProxyPortGameId[joinGame.SrcProxyPort] = gameId
-				playerCount := countGamePlayers(gameState, gameId)
-				updatePlayerCount(gameState, gameId, playerCount)
+				playerJoinGame(gameState, joinGame.SrcProxyPort, gameId)
 			}
 		case packet := <-udpPacketChannel:
 			handleGameInfoPacket(gameState, gameStartChannel, proxyIp, packet)
@@ -125,7 +123,7 @@ func handleGameInfoPacket(gameState GameState, gameStartChannel chan GameStart, 
 
 	route, err := proxy.GetRouteByAddr(gameState.routes, packet.SrcAddr)
 	if err == nil {
-		gameState.mapProxyPortGameId[route.ProxyPort] = newGameInfo.GameId
+		playerJoinGame(gameState, route.ProxyPort, newGameInfo.GameId)
 	} else {
 		gameStartChannel <- GameStart{packet.SrcAddr, newGameInfo.GameId}
 	}
@@ -148,6 +146,23 @@ func updatePlayerCount(gameState GameState, gameId bolo.GameId, playerCount int)
 	updatedGameInfo := gameState.mapGameIdGameInfo[gameId]
 	updatedGameInfo.PlayerCount = uint16(playerCount)
 	gameState.mapGameIdGameInfo[gameId] = updatedGameInfo
+}
+
+func playerJoinGame(gameState GameState, playerPort int, newGameId bolo.GameId) {
+	oldGameId, oldGameIdOk := gameState.mapProxyPortGameId[playerPort]
+
+	gameState.mapProxyPortGameId[playerPort] = newGameId
+	playerCount := countGamePlayers(gameState, newGameId)
+	updatePlayerCount(gameState, newGameId, playerCount)
+
+	if oldGameIdOk {
+		oldGamePlayerCount := countGamePlayers(gameState, oldGameId)
+		if oldGamePlayerCount == 0 {
+			delete(gameState.mapGameIdGameInfo, oldGameId)
+		} else {
+			updatePlayerCount(gameState, oldGameId, oldGamePlayerCount)
+		}
+	}
 }
 
 func initGameState() GameState {

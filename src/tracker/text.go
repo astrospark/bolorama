@@ -63,8 +63,7 @@ func getTrackerText(hostname string, gameState GameState) string {
 func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, players []string) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Host: %s", hostname))
-	// sb.WriteString(fmt.Sprintf("\r {%d}", port))
+	sb.WriteString(fmt.Sprintf("Host: %s {%d}", hostname, hostport))
 	sb.WriteString(fmt.Sprintf("  Players: %d", gameInfo.PlayerCount))
 	sb.WriteString(fmt.Sprintf("  Bases: %d", gameInfo.NeutralBaseCount))
 	sb.WriteString(fmt.Sprintf("  Pills: %d\r", gameInfo.NeutralPillboxCount))

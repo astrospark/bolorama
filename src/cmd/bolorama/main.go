@@ -59,6 +59,7 @@ func main() {
 	context.joinGameChannel = make(chan tracker.JoinGame)
 	context.trackerLeaveGameChannel = make(chan proxy.Route)
 	context.leaveGameChannel = make(chan proxy.Route)
+	context.playerTimeoutChannel = make(chan proxy.Route)
 	context.shutdownChannel = make(chan struct{})
 	context.proxyIP = util.GetOutboundIp()
 	context.wg = new(sync.WaitGroup)
@@ -80,6 +81,7 @@ func main() {
 		context.newRouteChannel,
 		context.joinGameChannel,
 		context.trackerLeaveGameChannel,
+		context.playerTimeoutChannel,
 	)
 
 loop:
@@ -92,6 +94,7 @@ loop:
 		case leaveGameRoute := <-context.playerTimeoutChannel:
 			close(leaveGameRoute.DisconnectChannel)
 			context.routes = proxy.DeleteRoute(context.routes, leaveGameRoute)
+			context.trackerLeaveGameChannel <- leaveGameRoute
 			printRouteTable(context.routes)
 		case leaveGameRoute := <-context.leaveGameChannel:
 			close(leaveGameRoute.DisconnectChannel)

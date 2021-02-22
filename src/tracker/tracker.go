@@ -33,6 +33,11 @@ type PlayerName struct {
 	Name      string
 }
 
+type PlayerPong struct {
+	ProxyPort int
+	Timestamp time.Time
+}
+
 type GameState struct {
 	routes                      []proxy.Route
 	mapGameIdGameInfo           map[bolo.GameId]bolo.GameInfo
@@ -48,10 +53,13 @@ func Tracker(
 	newRouteChannel chan NewRoute,
 	joinGameChannel chan JoinGame,
 	leaveGameChannel chan proxy.Route,
+	playerTimeoutChannel chan proxy.Route,
 ) {
 	defer wg.Done()
 	udpPacketChannel := make(chan proxy.UdpPacket)
 	tcpRequestChannel := make(chan net.Conn)
+	playerPongChannel := make(chan PlayerPong)
+	playerPingTimeoutChannel := make(chan int)
 	hostname := config.GetValueString("hostname")
 	port := config.GetValueInt("tracker_port")
 	proxyIp := util.GetOutboundIp()
@@ -59,15 +67,23 @@ func Tracker(
 
 	udpConnection := connectUdp(port)
 
-	wg.Add(2)
+	wg.Add(3)
 	go udpListener(wg, shutdownChannel, udpConnection, port, udpPacketChannel)
 	go tcpListener(wg, shutdownChannel, port, tcpRequestChannel)
+	go pingTimeout(wg, shutdownChannel, playerPongChannel, playerPingTimeoutChannel)
 
 	for {
 		select {
 		case _, ok := <-shutdownChannel:
 			if !ok {
 				return
+			}
+		case playerPort := <-playerPingTimeoutChannel:
+			for _, route := range gameState.routes {
+				if route.ProxyPort == playerPort {
+					playerTimeoutChannel <- route
+					break
+				}
 			}
 		case leaveGameRoute := <-leaveGameChannel:
 			gameId := gameState.mapProxyPortGameId[leaveGameRoute.ProxyPort]
@@ -98,6 +114,10 @@ func Tracker(
 				playerJoinGame(gameState, joinGame.SrcProxyPort, gameId)
 			}
 		case packet := <-udpPacketChannel:
+			route, err := proxy.GetRouteByAddr(gameState.routes, packet.SrcAddr)
+			if err == nil {
+				playerPongChannel <- PlayerPong{route.ProxyPort, time.Now()}
+			}
 			handleGameInfoPacket(gameState, gameStartChannel, proxyIp, packet)
 		case conn := <-tcpRequestChannel:
 			conn.Write([]byte(getTrackerText(hostname, gameState)))
@@ -127,6 +147,8 @@ func handleGameInfoPacket(gameState GameState, gameStartChannel chan GameStart, 
 		newGameInfo.ServerStartTimestamp = gameInfo.ServerStartTimestamp
 	} else {
 		newGameInfo.ServerStartTimestamp = time.Now()
+		bolo.PrintGameInfo(newGameInfo)
+		fmt.Println()
 	}
 	gameState.mapGameIdGameInfo[newGameInfo.GameId] = newGameInfo
 
@@ -136,9 +158,6 @@ func handleGameInfoPacket(gameState GameState, gameStartChannel chan GameStart, 
 	} else {
 		gameStartChannel <- GameStart{packet.SrcAddr, newGameInfo.GameId}
 	}
-
-	bolo.PrintGameInfo(newGameInfo)
-	fmt.Println()
 }
 
 func pingGameInfo(connection *net.UDPConn, route proxy.Route, stopChannel chan struct{}) {
@@ -148,6 +167,7 @@ func pingGameInfo(connection *net.UDPConn, route proxy.Route, stopChannel chan s
 	for {
 		select {
 		case <-stopChannel:
+			fmt.Println("Stopped pinging player", route.ProxyPort)
 			ticker.Stop()
 			return
 		case <-ticker.C:
@@ -156,6 +176,31 @@ func pingGameInfo(connection *net.UDPConn, route proxy.Route, stopChannel chan s
 				break
 			}
 			connection.WriteToUDP(buffer, &route.PlayerIPAddr)
+		}
+	}
+}
+
+func pingTimeout(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerPongChannel chan PlayerPong, playerPingTimeoutChannel chan int) {
+	defer wg.Done()
+	gameInfoPingDuration := time.Duration(config.GetValueInt("game_info_ping_seconds")) * time.Second
+	gameInfoTimeoutDuration := gameInfoPingDuration + (5 * time.Second)
+	mapPlayerPortPongTimestamp := make(map[int]time.Time)
+	ticker := time.NewTicker(gameInfoPingDuration / 4)
+
+	for {
+		select {
+		case <-shutdownChannel:
+			ticker.Stop()
+			return
+		case pong := <-playerPongChannel:
+			mapPlayerPortPongTimestamp[pong.ProxyPort] = pong.Timestamp
+		case <-ticker.C:
+			for playerPort, timestamp := range mapPlayerPortPongTimestamp {
+				if time.Now().After(timestamp.Add(gameInfoTimeoutDuration)) {
+					playerPingTimeoutChannel <- playerPort
+					delete(mapPlayerPortPongTimestamp, playerPort)
+				}
+			}
 		}
 	}
 }

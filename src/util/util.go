@@ -5,6 +5,12 @@ import (
 	"net"
 )
 
+type PlayerAddr struct {
+	IpAddr    string
+	IpPort    int
+	ProxyPort int
+}
+
 // get preferred outbound ip of this machine
 func GetOutboundIp() net.IP {
 	conn, err := net.Dial("udp", "1.1.1.1:1")

@@ -7,23 +7,15 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"git.astrospark.com/bolorama/bolo"
 	"git.astrospark.com/bolorama/config"
 	"git.astrospark.com/bolorama/proxy"
+	"git.astrospark.com/bolorama/state"
 	"git.astrospark.com/bolorama/tracker"
 	"git.astrospark.com/bolorama/util"
 )
-
-func printRouteTable(routes []proxy.Route) {
-	fmt.Println()
-	fmt.Println("Route Table")
-	for _, route := range routes {
-		fmt.Printf("   %s:%d <%d>\n", route.PlayerIPAddr.IP, route.PlayerIPAddr.Port, route.ProxyPort)
-	}
-}
 
 func initSignalHandler(shutdownChannel chan struct{}) {
 	signalChannel := make(chan os.Signal)
@@ -34,87 +26,47 @@ func initSignalHandler(shutdownChannel chan struct{}) {
 	}()
 }
 
-type context struct {
-	//gameIDRouteTableMap  map[[8]byte][]proxy.Route
-	routes                  []proxy.Route
-	rxChannel               chan proxy.UdpPacket
-	gameStartChannel        chan tracker.GameStart
-	newRouteChannel         chan tracker.NewRoute
-	joinGameChannel         chan tracker.JoinGame
-	trackerLeaveGameChannel chan proxy.Route
-	leaveGameChannel        chan proxy.Route
-	playerTimeoutChannel    chan proxy.Route
-	shutdownChannel         chan struct{}
-	proxyIP                 net.IP
-	wg                      *sync.WaitGroup
-}
-
 func main() {
 	proxyHostname := config.GetValueString("hostname")
 
-	var context context
-	context.rxChannel = make(chan proxy.UdpPacket)
-	context.gameStartChannel = make(chan tracker.GameStart)
-	context.newRouteChannel = make(chan tracker.NewRoute)
-	context.joinGameChannel = make(chan tracker.JoinGame)
-	context.trackerLeaveGameChannel = make(chan proxy.Route)
-	context.leaveGameChannel = make(chan proxy.Route)
-	context.playerTimeoutChannel = make(chan proxy.Route)
-	context.shutdownChannel = make(chan struct{})
-	context.proxyIP = util.GetOutboundIp()
-	context.wg = new(sync.WaitGroup)
+	context := state.InitContext()
+	playerLeaveGameChannel := make(chan util.PlayerAddr)
+	startPlayerPingChannel := make(chan state.Player)
 
 	fmt.Println("Hostname:", proxyHostname)
-	fmt.Println("IP Address:", context.proxyIP)
+	fmt.Println("IP Address:", context.ProxyIpAddr)
 
 	defer func() {
 		fmt.Println("Shutdown completed")
 	}()
 
-	initSignalHandler(context.shutdownChannel)
+	initSignalHandler(context.ShutdownChannel)
 
-	context.wg.Add(1)
+	context.WaitGroup.Add(1)
 	go tracker.Tracker(
-		context.wg,
-		context.shutdownChannel,
-		context.gameStartChannel,
-		context.newRouteChannel,
-		context.joinGameChannel,
-		context.trackerLeaveGameChannel,
-		context.playerTimeoutChannel,
+		context,
+		startPlayerPingChannel,
 	)
 
 loop:
 	for {
 		select {
-		case _, ok := <-context.shutdownChannel:
+		case _, ok := <-context.ShutdownChannel:
 			if !ok {
 				break loop
 			}
-		case leaveGameRoute := <-context.playerTimeoutChannel:
-			close(leaveGameRoute.DisconnectChannel)
-			context.routes = proxy.DeleteRoute(context.routes, leaveGameRoute)
-			context.trackerLeaveGameChannel <- leaveGameRoute
-			printRouteTable(context.routes)
-		case leaveGameRoute := <-context.leaveGameChannel:
-			close(leaveGameRoute.DisconnectChannel)
-			context.routes = proxy.DeleteRoute(context.routes, leaveGameRoute)
-			context.trackerLeaveGameChannel <- leaveGameRoute
-			printRouteTable(context.routes)
-		case gameStart := <-context.gameStartChannel:
-			playerRoute := proxy.AddPlayer(context.wg, context.shutdownChannel, gameStart.PlayerAddr, context.rxChannel)
-			context.routes = append(context.routes, playerRoute)
-			context.newRouteChannel <- tracker.NewRoute{PlayerRoute: playerRoute, GameId: gameStart.GameId}
-			printRouteTable(context.routes)
-		case packet := <-context.rxChannel:
-			processPacket(&context, packet)
+		case playerPort := <-playerLeaveGameChannel:
+			state.PlayerDelete(context, playerPort, true)
+			state.PrintServerState(context, true)
+		case packet := <-context.RxChannel:
+			processPacket(context, packet, startPlayerPingChannel, playerLeaveGameChannel)
 		}
 	}
 
-	context.wg.Wait()
+	context.WaitGroup.Wait()
 }
 
-func processPacket(context *context, packet proxy.UdpPacket) {
+func processPacket(context *state.ServerContext, packet proxy.UdpPacket, startPlayerPingChannel chan state.Player, playerLeaveGameChannel chan util.PlayerAddr) {
 	valid, _ := bolo.ValidatePacket(packet)
 	if !valid {
 		// skip non-bolo packets
@@ -123,43 +75,47 @@ func processPacket(context *context, packet proxy.UdpPacket) {
 
 	packetType := bolo.GetPacketType(packet.Buffer)
 
+	context.Mutex.Lock()
+
 	// get destination player ip by proxy port
-	dstRoute, err := proxy.GetRouteByPort(context.routes, packet.DstPort)
+	dstPlayer, err := state.PlayerGetByPort(context, packet.DstPort, false)
 	if err != nil {
-		// shouldn't be able to receive data on a port that isn't mapped
+		// normally won't happen, but there could be a pending packet incoming from a player that was subsequently deleted
 		fmt.Println(err)
+		context.Mutex.Unlock()
 		return
 	}
 
 	// get proxy port by source player ip
-	srcRoute, err := proxy.GetRouteByAddr(context.routes, packet.SrcAddr)
+	srcPlayer, err := state.PlayerGetByAddr(context, packet.SrcAddr, false)
 	if err != nil {
-		srcRoute = proxy.AddPlayer(context.wg, context.shutdownChannel, packet.SrcAddr, context.rxChannel)
-		context.routes = append(context.routes, srcRoute)
-		context.newRouteChannel <- tracker.NewRoute{PlayerRoute: srcRoute, GameId: bolo.GameId{}}
-
-		printRouteTable(context.routes)
+		srcPlayer = state.PlayerNew(context, packet.SrcAddr, dstPlayer.GameId, false)
+		startPlayerPingChannel <- srcPlayer
+		state.PrintServerState(context, false)
 	}
 
 	if packetType == bolo.PacketType5 {
-		context.joinGameChannel <- tracker.JoinGame{SrcProxyPort: srcRoute.ProxyPort, DstProxyPort: dstRoute.ProxyPort}
+		state.PlayerJoinGame(context, srcPlayer.ProxyPort, dstPlayer.GameId, false)
 	}
 
-	go forwardPacket(packet, context.proxyIP, srcRoute, dstRoute, context.leaveGameChannel)
+	context.Mutex.Unlock()
+
+	go forwardPacket(packet, context.ProxyIpAddr, srcPlayer, dstPlayer, playerLeaveGameChannel)
 }
 
-func forwardPacket(packet proxy.UdpPacket, proxyIP net.IP, srcRoute proxy.Route, dstRoute proxy.Route, leaveGameChannel chan proxy.Route) {
-	bolo.RewritePacket(packet.Buffer, proxyIP, srcRoute.ProxyPort, srcRoute, leaveGameChannel)
+func forwardPacket(packet proxy.UdpPacket, proxyIP net.IP, srcPlayer state.Player, dstPlayer state.Player, playerLeaveGameChannel chan util.PlayerAddr) {
+	srcPlayerAddr := util.PlayerAddr{IpAddr: srcPlayer.IpAddr.String(), IpPort: srcPlayer.IpPort, ProxyPort: srcPlayer.ProxyPort}
+	bolo.RewritePacket(packet.Buffer, proxyIP, srcPlayer.ProxyPort, srcPlayerAddr, playerLeaveGameChannel)
 
 	if bytes.Contains(packet.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
 		fmt.Println()
 		fmt.Println("Warning: Outgoing packet matches 192.168.0.80")
 		fmt.Printf("Src: %s:%d Dst: %s:%d\n",
-			srcRoute.PlayerIPAddr.IP.String(), srcRoute.PlayerIPAddr.Port,
-			dstRoute.PlayerIPAddr.IP.String(), dstRoute.PlayerIPAddr.Port)
+			srcPlayer.IpAddr.String(), srcPlayer.IpPort,
+			dstPlayer.IpAddr.String(), dstPlayer.IpPort)
 		fmt.Println(hex.Dump(packet.Buffer))
 	}
 
-	packet.DstAddr = dstRoute.PlayerIPAddr
-	srcRoute.TxChannel <- packet
+	packet.DstAddr = net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
+	srcPlayer.TxChannel <- packet
 }

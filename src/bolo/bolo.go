@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"git.astrospark.com/bolorama/proxy"
+	"git.astrospark.com/bolorama/util"
 	"github.com/snksoft/crc"
 )
 
@@ -98,15 +99,15 @@ func GetPacketType(msg []byte) int {
 
 func ValidatePacket(packet proxy.UdpPacket) (bool, string) {
 	if packet.Len < PacketHeaderSize {
-		return false, fmt.Sprint("datagram too short (smaller than bolo header)")
+		return false, fmt.Sprintf("datagram too short (smaller than bolo header) (%d)", packet.Len)
 	}
 
 	if !verifyBoloSignature(packet.Buffer) {
-		return false, fmt.Sprint("datagram failed bolo signature check")
+		return false, fmt.Sprintf("datagram failed bolo signature check (%s)", hex.EncodeToString(packet.Buffer[0:4]))
 	}
 
 	if !verifyBoloVersion(packet.Buffer) {
-		return false, fmt.Sprint("unsupported bolo version")
+		return false, fmt.Sprintf("unsupported bolo version (%s)", hex.EncodeToString(packet.Buffer[4:7]))
 	}
 
 	return true, ""
@@ -171,7 +172,7 @@ func ParsePacketGameInfo(msg []byte) GameInfo {
 
 func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println()
-	fmt.Println("Game Id:", gameInfo.GameId)
+	fmt.Println("Game Id:", hex.EncodeToString(gameInfo.GameId[:]))
 	fmt.Println("Map Name:", gameInfo.MapName)
 	fmt.Println("Start Timestamp:", time.Unix(int64(gameInfo.StartTimestamp-seconds1904ToUnixEpoch), 0))
 	fmt.Println("Game Type:", gameInfo.GameType)
@@ -184,6 +185,7 @@ func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println("Neutral Pillbox Count:", gameInfo.NeutralPillboxCount)
 	fmt.Println("Neutral Base Count:", gameInfo.NeutralBaseCount)
 	fmt.Println("Password:", gameInfo.HasPassword)
+	fmt.Println()
 }
 
 func rewriteOpcodePlayerInfo(
@@ -191,18 +193,18 @@ func rewriteOpcodePlayerInfo(
 	buffer []byte,
 	proxyPort int,
 	proxyIP net.IP,
-	srcRoute proxy.Route,
-	leaveGameChannel chan proxy.Route,
+	srcPlayer util.PlayerAddr,
+	playerLeaveGameChannel chan util.PlayerAddr,
 ) {
 	// skip address length, first address
 	pos = pos + 7
 
 	playerPort := binary.BigEndian.Uint16(buffer[pos+4 : pos+6])
-	fmt.Printf("Player disconnecting %d.%d.%d.%d:%d\n", buffer[pos+0], buffer[pos+1], buffer[pos+2], buffer[pos+3], playerPort)
+	fmt.Printf("Player disconnecting: %d (NAT %d.%d.%d.%d:%d)\n", proxyPort, buffer[pos+0], buffer[pos+1], buffer[pos+2], buffer[pos+3], playerPort)
 	//if bytes.Equal(srcRoute.PlayerIPAddr.IP, buffer[pos:pos+4]) && int(playerPort) == srcRoute.PlayerIPAddr.Port {
 	if !bytes.Equal(buffer[pos:pos+4], proxyIP) {
 		fmt.Println("Sending LeaveGame event")
-		leaveGameChannel <- srcRoute
+		playerLeaveGameChannel <- srcPlayer
 	}
 
 	if !bytes.Equal(proxyIP, buffer[pos:pos+4]) {
@@ -220,10 +222,13 @@ func rewriteOpcodeGameInfo(pos int, buffer []byte, proxyPort int, proxyIP net.IP
 
 	//fmt.Println("OpcodeMapData Map Name:", string(mapName))
 
-	buffer[pos+0] = proxyIP[0]
-	buffer[pos+1] = proxyIP[1]
-	buffer[pos+2] = proxyIP[2]
-	buffer[pos+3] = proxyIP[3]
+	// game id is more unique if we leave the original ip address
+	/*
+		buffer[pos+0] = proxyIP[0]
+		buffer[pos+1] = proxyIP[1]
+		buffer[pos+2] = proxyIP[2]
+		buffer[pos+3] = proxyIP[3]
+	*/
 }
 
 // parseOpcode returns the opcode and the length (including the opcode byte(s))
@@ -289,8 +294,8 @@ func rewriteGameStateBlock(
 	buffer []byte,
 	proxyPort int,
 	proxyIP net.IP,
-	srcRoute proxy.Route,
-	leaveGameChannel chan proxy.Route,
+	srcPlayer util.PlayerAddr,
+	playerLeaveGameChannel chan util.PlayerAddr,
 ) int {
 	// block length includes length byte, does not include checksum
 	blockLength := int(buffer[posStart] & 0x7f)
@@ -340,7 +345,7 @@ func rewriteGameStateBlock(
 				rewriteCrc = true
 			}
 		case OpcodeDisconnect:
-			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP, srcRoute, leaveGameChannel)
+			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP, srcPlayer, playerLeaveGameChannel)
 			rewriteCrc = true
 		}
 
@@ -355,13 +360,13 @@ func rewriteGameStateBlock(
 	return posNextBlock
 }
 
-func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int, srcRoute proxy.Route, leaveGameChannel chan proxy.Route) {
+func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int, srcPlayer util.PlayerAddr, playerLeaveGameChannel chan util.PlayerAddr) {
 	pos := PacketHeaderSize
 	packetSequence := int(buffer[pos])
 	pos = pos + 1 // skip state sequence
 
 	for pos < len(buffer) {
-		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP, srcRoute, leaveGameChannel)
+		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP, srcPlayer, playerLeaveGameChannel)
 	}
 }
 
@@ -379,7 +384,7 @@ func rewritePacketFixedPosition(buffer []byte, proxyIP net.IP, proxyPort int, of
 	}
 }
 
-func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcRoute proxy.Route, leaveGameChannel chan proxy.Route) {
+func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcPlayer util.PlayerAddr, playerLeaveGameChannel chan util.PlayerAddr) {
 	// only the player who starts the game will send packets with the wrong ip address, and it will
 	// be their own. so we can search for any ip that isn't ours, replace it with ours, and replace
 	// the port with the player's assigned port
@@ -397,7 +402,7 @@ func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcRoute proxy.
 	case PacketType1:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType1PeerAddrOffset)
 	case PacketTypeGameState:
-		rewritePacketGameState(buffer, proxyIP, proxyPort, srcRoute, leaveGameChannel)
+		rewritePacketGameState(buffer, proxyIP, proxyPort, srcPlayer, playerLeaveGameChannel)
 	case PacketType6:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType6PeerAddrOffset)
 	case PacketType7:

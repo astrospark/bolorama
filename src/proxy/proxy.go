@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -72,7 +71,7 @@ func getNextAvailablePort(firstPort int, assignedPorts *[]int) int {
 	return nextPort
 }
 
-func deletePort(port int) {
+func DeletePort(port int) {
 	idx := -1
 	for i, value := range assignedPlayerPorts {
 		if value == port {
@@ -87,60 +86,25 @@ func deletePort(port int) {
 	}
 }
 
-func GetRouteByAddr(routes []Route, addr net.UDPAddr) (Route, error) {
-	for _, route := range routes {
-		if addr.IP.Equal(route.PlayerIPAddr.IP) && addr.Port == route.PlayerIPAddr.Port {
-			return route, nil
-		}
-	}
-
-	return Route{}, fmt.Errorf("Error: Socket %s:%d not found in route table",
-		addr.IP.String(), addr.Port)
-}
-
-func GetRouteByPort(routes []Route, port int) (Route, error) {
-	for _, route := range routes {
-		if port == route.ProxyPort {
-			return route, nil
-		}
-	}
-
-	return Route{}, fmt.Errorf("Error: Port %d not found in route tables", port)
-}
-
-func DeleteRoute(routes []Route, remove Route) []Route {
-	remove_idx := -1
-	for i, route := range routes {
-		if bytes.Equal(route.PlayerIPAddr.IP, remove.PlayerIPAddr.IP) && route.ProxyPort == remove.ProxyPort {
-			remove_idx = i
-			break
-		}
-	}
-
-	if remove_idx >= 0 {
-		routes[remove_idx] = routes[len(routes)-1]
-		routes[len(routes)-1] = Route{}
-		routes = routes[:len(routes)-1]
-		deletePort(remove.ProxyPort)
-	}
-
-	return routes
-}
-
-func AddPlayer(wg *sync.WaitGroup, shutdownChannel chan struct{}, srcAddr net.UDPAddr, rxChannel chan UdpPacket) Route {
+func AddPlayer(
+	wg *sync.WaitGroup,
+	playerAddr net.UDPAddr,
+	rxChannel chan UdpPacket,
+	disconnectChannel chan struct{},
+	shutdownChannel chan struct{},
+) (int, chan UdpPacket, *net.UDPConn) {
 	if len(assignedPlayerPorts) > 1000 {
 		// TODO this allows someone to deny service
 		panic("maximum players exceeded (1000)")
 	}
 	nextPlayerPort := getNextAvailablePort(firstPlayerPort, &assignedPlayerPorts)
-	playerRoute := newPlayerRoute(srcAddr, nextPlayerPort, rxChannel)
-	createPlayerProxy(wg, shutdownChannel, playerRoute)
-	return playerRoute
+	playerRoute := newPlayerRoute(playerAddr, nextPlayerPort, rxChannel, disconnectChannel)
+	createPlayerProxy(wg, playerRoute, shutdownChannel)
+	return playerRoute.ProxyPort, playerRoute.TxChannel, playerRoute.Connection
 }
 
-func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket) Route {
+func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket, disconnectChannel chan struct{}) Route {
 	txChannel := make(chan UdpPacket)
-	disconnectChannel := make(chan struct{})
 
 	return Route{
 		addr,
@@ -152,7 +116,7 @@ func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket) Route 
 	}
 }
 
-func createPlayerProxy(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerRoute Route) {
+func createPlayerProxy(wg *sync.WaitGroup, playerRoute Route, shutdownChannel chan struct{}) {
 	fmt.Println()
 	fmt.Printf("Creating proxy: %d => %s:%d\n", playerRoute.ProxyPort,
 		playerRoute.PlayerIPAddr.IP.String(), playerRoute.PlayerIPAddr.Port)
@@ -186,12 +150,12 @@ func udpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, playerRoute 
 			case _, ok := <-playerRoute.DisconnectChannel:
 				if !ok {
 					playerRoute.Connection.Close()
-					break
+					return
 				}
 			case _, ok := <-shutdownChannel:
 				if !ok {
 					playerRoute.Connection.Close()
-					break
+					return
 				}
 			}
 		}

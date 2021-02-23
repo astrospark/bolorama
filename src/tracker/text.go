@@ -7,11 +7,17 @@ import (
 	"time"
 
 	"git.astrospark.com/bolorama/bolo"
+	"git.astrospark.com/bolorama/state"
 )
 
 var yesNo = map[bool]string{
 	true:  "Yes",
 	false: "No",
+}
+
+var minesHiddenVisible = map[bool]string{
+	true:  "Hidden",
+	false: "Visible",
 }
 
 var gameTypeName = map[int]string{
@@ -20,18 +26,21 @@ var gameTypeName = map[int]string{
 	3: "Strict Tournament",
 }
 
-func getTrackerText(hostname string, gameState GameState) string {
+func getTrackerText(context *state.ServerContext, hostname string) string {
+	context.Mutex.RLock()
+	defer context.Mutex.RUnlock()
+
 	var sb strings.Builder
 
 	sb.WriteString("= =================================================================== =\r")
-	sb.WriteString("=                                                                     =\r")
 	sb.WriteString("=                         Astrospark Bolorama                         =\r")
 	sb.WriteString("=                                                                     =\r")
+	sb.WriteString("=                      http://bolo.astrospark.com                     =\r")
 	sb.WriteString("= =================================================================== =\r")
 	sb.WriteString("\r")
 
 	var games []bolo.GameInfo
-	for _, game := range gameState.mapGameIdGameInfo {
+	for _, game := range context.Games {
 		games = append(games, game)
 	}
 	sort.Slice(games, func(i, j int) bool {
@@ -44,8 +53,8 @@ func getTrackerText(hostname string, gameState GameState) string {
 	}
 
 	for _, game := range games {
-		ports := getGamePorts(gameState, game.GameId)
-		players := getPlayers(gameState, ports)
+		ports := getGamePlayerPorts(context, game.GameId)
+		players := getGamePlayerNames(context, game.GameId)
 		sort.Ints(ports)
 		sb.WriteString(getGameInfoText(hostname, ports[0], game, players))
 		sb.WriteString("\r")
@@ -56,6 +65,8 @@ func getTrackerText(hostname string, gameState GameState) string {
 	} else {
 		sb.WriteString(fmt.Sprintf("   There are %d games in progress.\r\r", len(games)))
 	}
+
+	sb.WriteString(state.SprintServerState(context, "\r", false))
 
 	return sb.String()
 }
@@ -70,13 +81,13 @@ func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, play
 
 	sb.WriteString(fmt.Sprintf("Map: %s", gameInfo.MapName))
 	sb.WriteString(fmt.Sprintf("  Game: %s", gameTypeName[gameInfo.GameType]))
-	sb.WriteString(fmt.Sprintf("  Mines: %s", yesNo[gameInfo.AllowHiddenMines]))
+	sb.WriteString(fmt.Sprintf("  Mines: %s", minesHiddenVisible[gameInfo.AllowHiddenMines]))
 	sb.WriteString(fmt.Sprintf("  Bots: %s", yesNo[gameInfo.AllowComputer]))
 	sb.WriteString(fmt.Sprintf("  PW: %s\r", yesNo[gameInfo.HasPassword]))
 
-	sb.WriteString(fmt.Sprintf("Version: 0.99.7"))
+	sb.WriteString("Version: 0.99.7")
 	sb.WriteString(fmt.Sprintf("  Tracked-For: %d minutes", gameDuration(gameInfo)))
-	sb.WriteString(fmt.Sprintf("  Player-List:\r"))
+	sb.WriteString("  Player-List:\r")
 
 	playersText := strings.Join(players, ", ")
 	sb.WriteString(fmt.Sprintf("   %s\r", playersText))
@@ -86,29 +97,27 @@ func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, play
 	return sb.String()
 }
 
-func getGamePorts(gameState GameState, targetGameId bolo.GameId) []int {
+func getGamePlayerPorts(context *state.ServerContext, targetGameId bolo.GameId) []int {
 	var ports []int
-	for port, gameId := range gameState.mapProxyPortGameId {
-		if gameId == targetGameId {
-			ports = append(ports, port)
+	for _, player := range context.Players {
+		if player.GameId == targetGameId {
+			ports = append(ports, player.ProxyPort)
 		}
 	}
 	return ports
 }
 
-func getPlayers(gameState GameState, ports []int) []string {
-	var players []string
-	for _, port := range ports {
-		name, ok := gameState.mapProxyPortPlayerName[port]
-		if !ok {
-			name = "<<unknown>>"
+func getGamePlayerNames(context *state.ServerContext, targetGameId bolo.GameId) []string {
+	var playerNames []string
+	for _, player := range context.Players {
+		if player.GameId == targetGameId {
+			playerNames = append(playerNames, player.Name)
 		}
-		players = append(players, name)
 	}
-	return players
+	return playerNames
 }
 
 func gameDuration(gameInfo bolo.GameInfo) int {
-	duration := time.Now().Sub(gameInfo.ServerStartTimestamp)
+	duration := time.Since(gameInfo.ServerStartTimestamp)
 	return int(duration.Minutes())
 }

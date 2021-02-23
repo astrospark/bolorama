@@ -50,6 +50,10 @@ func load() {
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if len(line) == 0 {
+			// skip blank lines
+			continue
+		}
 		s := strings.SplitN(line, "=", 2)
 		if len(s) < 2 {
 			log.Fatalln("Malformed config:", line)

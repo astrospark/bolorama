@@ -58,6 +58,12 @@ func udpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, connection *
 
 		data := make([]byte, n)
 		copy(data, buffer)
-		dataChannel <- proxy.UdpPacket{*addr, net.UDPAddr{}, port, n, data}
+		dataChannel <- proxy.UdpPacket{
+			SrcAddr: *addr,
+			DstAddr: net.UDPAddr{},
+			DstPort: port,
+			Len:     n,
+			Buffer:  data,
+		}
 	}
 }

@@ -143,7 +143,7 @@ function dissect_packet_type_00(buffer, pinfo, tree)
 		local sender_port = buffer(pos + 4, 2):uint()
 		local sender_address = string.format("%s:%d", sender_ip, sender_port)
 		t:add(sender_address_field, buffer(pos, 6), sender_address); pos = pos + 6
-		t:append_text(string.format(", Sender: %s:%d", sender_address, sender_port))
+		t:append_text(string.format(", Sender: %s", sender_address))
 	else
 		t:add(unknown_field, buffer())
 	end
@@ -161,7 +161,7 @@ function dissect_packet_type_01(buffer, pinfo, tree)
 		local sender_port = buffer(pos + 4, 2):uint()
 		local sender_address = string.format("%s:%d", sender_ip, sender_port)
 		t:add(sender_address_field, buffer(pos, 6), sender_address); pos = pos + 6
-		t:append_text(string.format(", Sender: %s:%d", sender_address, sender_port))
+		t:append_text(string.format(", Sender: %s", sender_address))
 	else
 		t:add(unknown_field, buffer())
 	end
@@ -344,6 +344,9 @@ function dissect_game_info(buffer, pinfo, tree)
 		local start_time_mac = buffer(pos, 4):uint()
 		local start_time = convert_time_from_mac(start_time_mac)
 		local start_time_string = os.date("%c", start_time)
+		if start_time_string == nil then
+			start_time_string = string.format("0x%02x", start_time_mac)
+		end
 		t:add(start_time_field, buffer(pos, 4), start_time_string); pos = pos + 4
 
 		t:add(game_type_field, buffer(pos, 1)); pos = pos + 1

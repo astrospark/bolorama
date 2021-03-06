@@ -11,6 +11,14 @@ type PlayerAddr struct {
 	ProxyPort int
 }
 
+type PlayerInfoEvent struct {
+	PlayerAddr PlayerAddr
+	SetId      bool
+	SetName    bool
+	PlayerId   int
+	Name       string
+}
+
 // get preferred outbound ip of this machine
 func GetOutboundIp() net.IP {
 	conn, err := net.Dial("udp", "1.1.1.1:1")

@@ -30,6 +30,7 @@ func main() {
 	proxyHostname := config.GetValueString("hostname")
 
 	context := state.InitContext()
+	playerInfoEventChannel := make(chan util.PlayerInfoEvent)
 	playerLeaveGameChannel := make(chan util.PlayerAddr)
 	startPlayerPingChannel := make(chan state.Player)
 
@@ -55,18 +56,30 @@ loop:
 			if !ok {
 				break loop
 			}
+		case playerInfo := <-playerInfoEventChannel:
+			if playerInfo.SetId {
+				state.PlayerSetId(context, playerInfo.PlayerAddr, playerInfo.PlayerId, true)
+			} else if playerInfo.SetName {
+				state.PlayerSetName(context, playerInfo.PlayerAddr, playerInfo.PlayerId, playerInfo.Name)
+			}
 		case playerPort := <-playerLeaveGameChannel:
 			state.PlayerDelete(context, playerPort, true)
 			state.PrintServerState(context, true)
 		case packet := <-context.RxChannel:
-			processPacket(context, packet, startPlayerPingChannel, playerLeaveGameChannel)
+			processPacket(context, packet, startPlayerPingChannel, playerInfoEventChannel, playerLeaveGameChannel)
 		}
 	}
 
 	context.WaitGroup.Wait()
 }
 
-func processPacket(context *state.ServerContext, packet proxy.UdpPacket, startPlayerPingChannel chan state.Player, playerLeaveGameChannel chan util.PlayerAddr) {
+func processPacket(
+	context *state.ServerContext,
+	packet proxy.UdpPacket,
+	startPlayerPingChannel chan state.Player,
+	playerInfoEventChannel chan util.PlayerInfoEvent,
+	playerLeaveGameChannel chan util.PlayerAddr,
+) {
 	valid, _ := bolo.ValidatePacket(packet)
 	if !valid {
 		// skip non-bolo packets
@@ -95,17 +108,33 @@ func processPacket(context *state.ServerContext, packet proxy.UdpPacket, startPl
 	}
 
 	if packetType == bolo.PacketType5 {
-		state.PlayerJoinGame(context, srcPlayer.ProxyPort, dstPlayer.GameId, false)
+		if srcPlayer.GameId != dstPlayer.GameId {
+			state.PlayerJoinGame(context, srcPlayer.ProxyPort, dstPlayer.GameId, false)
+		}
 	}
 
 	context.Mutex.Unlock()
 
-	go forwardPacket(packet, context.ProxyIpAddr, srcPlayer, dstPlayer, playerLeaveGameChannel)
+	go forwardPacket(packet, context.ProxyIpAddr, srcPlayer, dstPlayer, playerInfoEventChannel, playerLeaveGameChannel)
 }
 
-func forwardPacket(packet proxy.UdpPacket, proxyIP net.IP, srcPlayer state.Player, dstPlayer state.Player, playerLeaveGameChannel chan util.PlayerAddr) {
+func forwardPacket(
+	packet proxy.UdpPacket,
+	proxyIP net.IP,
+	srcPlayer state.Player,
+	dstPlayer state.Player,
+	playerInfoEventChannel chan util.PlayerInfoEvent,
+	playerLeaveGameChannel chan util.PlayerAddr,
+) {
 	srcPlayerAddr := util.PlayerAddr{IpAddr: srcPlayer.IpAddr.String(), IpPort: srcPlayer.IpPort, ProxyPort: srcPlayer.ProxyPort}
-	bolo.RewritePacket(packet.Buffer, proxyIP, srcPlayer.ProxyPort, srcPlayerAddr, playerLeaveGameChannel)
+	bolo.RewritePacket(
+		packet.Buffer,
+		proxyIP,
+		srcPlayer.ProxyPort,
+		srcPlayerAddr,
+		playerInfoEventChannel,
+		playerLeaveGameChannel,
+	)
 
 	if bytes.Contains(packet.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
 		fmt.Println()

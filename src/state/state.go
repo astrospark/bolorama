@@ -181,6 +181,7 @@ func PlayerJoinGame(context *ServerContext, playerPort int, newGameId bolo.GameI
 			oldGameId = player.GameId
 			oldGameIdOk = true
 			context.Players[i].GameId = newGameId
+			context.Players[i].PlayerId = -1
 		}
 	}
 
@@ -220,4 +221,53 @@ func PlayerDelete(context *ServerContext, playerAddr util.PlayerAddr, lock bool)
 	proxy.DeletePort(context.Players[player_idx].ProxyPort)
 	context.Players = playerRemoveElement(context.Players, player_idx)
 	GameUpdatePlayerCount(context, gameId, false)
+}
+
+func PlayerSetId(context *ServerContext, addr util.PlayerAddr, playerId int, lock bool) {
+	if lock {
+		context.Mutex.Lock()
+		defer context.Mutex.Unlock()
+	}
+
+	playerIdx := -1
+	for i, player := range context.Players {
+		if (addr.IpAddr == player.IpAddr.String()) && (addr.IpPort == player.IpPort) && (addr.ProxyPort == player.ProxyPort) {
+			playerIdx = i
+			break
+		}
+	}
+
+	if playerIdx >= 0 {
+		context.Players[playerIdx].PlayerId = playerId
+	}
+}
+
+func PlayerSetName(context *ServerContext, addr util.PlayerAddr, playerId int, playerName string) {
+	context.Mutex.Lock()
+	defer context.Mutex.Unlock()
+
+	gameId := [8]byte{}
+	gameIdFound := false
+	for _, player := range context.Players {
+		if (addr.IpAddr == player.IpAddr.String()) && (addr.IpPort == player.IpPort) && (addr.ProxyPort == player.ProxyPort) {
+			gameId = player.GameId
+			gameIdFound = true
+			break
+		}
+	}
+
+	if !gameIdFound {
+		return
+	}
+
+	for i, player := range context.Players {
+		if (player.GameId == gameId) && (player.PlayerId == playerId) {
+			if strings.HasSuffix(playerName, "Unknown Machine Name") {
+				nameSlice := strings.Split(playerName, "@")
+				playerName = strings.Join(nameSlice[0:len(nameSlice)-1], "")
+			}
+			context.Players[i].Name = playerName
+			break
+		}
+	}
 }

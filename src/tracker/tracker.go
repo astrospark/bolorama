@@ -14,11 +14,6 @@ import (
 	"git.astrospark.com/bolorama/util"
 )
 
-type PlayerName struct {
-	ProxyPort int
-	Name      string
-}
-
 func Tracker(
 	context *state.ServerContext,
 	startPlayerPingChannel chan state.Player,
@@ -94,22 +89,29 @@ func handleGameInfoPacket(
 	context.Mutex.Lock()
 	defer func() { context.Mutex.Unlock() }()
 
+	newGame := false
 	gameInfo, ok := context.Games[newGameInfo.GameId]
 	if ok {
 		newGameInfo.ServerStartTimestamp = gameInfo.ServerStartTimestamp
 	} else {
 		newGameInfo.ServerStartTimestamp = time.Now()
+		newGame = true
 		bolo.PrintGameInfo(newGameInfo)
 	}
 	context.Games[newGameInfo.GameId] = newGameInfo
 
 	player, err := state.PlayerGetByAddr(context, packet.SrcAddr, false)
 	if err == nil {
-		state.PlayerJoinGame(context, player.ProxyPort, newGameInfo.GameId, false)
+		if player.GameId != newGameInfo.GameId {
+			state.PlayerJoinGame(context, player.ProxyPort, newGameInfo.GameId, false)
+		}
 	} else {
 		player = state.PlayerNew(context, packet.SrcAddr, newGameInfo.GameId, false)
 		playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
 		go pingGameInfo(udpConnection, player, context.ShutdownChannel)
+		if newGame {
+			state.PlayerSetId(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, 0, false)
+		}
 		state.PrintServerState(context, false)
 	}
 }

@@ -89,10 +89,23 @@ func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, play
 	sb.WriteString(fmt.Sprintf("  Tracked-For: %d minutes", gameDuration(gameInfo)))
 	sb.WriteString("  Player-List:\r")
 
-	playersText := strings.Join(players, ", ")
-	sb.WriteString(fmt.Sprintf("   %s\r", playersText))
-
-	// sb.WriteString(fmt.Sprintf("   -\r"))
+	startIdx := 0
+	lineLength := 0
+	for i := range players {
+		playerLength := len(players[i])
+		if lineLength+playerLength+2 > 80 {
+			sb.WriteString(fmt.Sprintf("   %s", strings.Join(players[startIdx:i], ", ")))
+			if i < len(players) {
+				sb.WriteString(", ")
+			}
+			sb.WriteString("\r")
+			startIdx = i
+			lineLength = 0
+		} else {
+			lineLength = lineLength + playerLength + 2
+		}
+	}
+	sb.WriteString(fmt.Sprintf("   %s\r", strings.Join(players[startIdx:], ", ")))
 
 	return sb.String()
 }

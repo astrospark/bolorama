@@ -295,6 +295,7 @@ func rewriteGameStateBlock(
 	proxyPort int,
 	proxyIP net.IP,
 	srcPlayer util.PlayerAddr,
+	playerInfoEventChannel chan util.PlayerInfoEvent,
 	playerLeaveGameChannel chan util.PlayerAddr,
 ) int {
 	// block length includes length byte, does not include checksum
@@ -315,6 +316,7 @@ func rewriteGameStateBlock(
 	//blockSequence := buffer[posBlockStart]
 	pos := posBlockStart + 1 // skip sequence
 	senderFlags := buffer[pos] & 0xf0
+	sender := buffer[pos] & 0x0f
 	pos = pos + 1
 	flags := buffer[pos]
 	pos = pos + 1
@@ -344,6 +346,13 @@ func rewriteGameStateBlock(
 				rewriteOpcodeGameInfo(pos+2, buffer, proxyPort, proxyIP)
 				rewriteCrc = true
 			}
+		case OpcodePlayerName:
+			if (packetSequence == 0x02) && (buffer[posStart]&0x80 == 0) {
+				playerInfoEventChannel <- util.PlayerInfoEvent{srcPlayer, true, false, int(sender), ""}
+			}
+			nameLength := int(buffer[pos+1])
+			playerName := string(buffer[pos+2 : pos+2+nameLength])
+			playerInfoEventChannel <- util.PlayerInfoEvent{srcPlayer, false, true, int(sender), playerName}
 		case OpcodeDisconnect:
 			rewriteOpcodePlayerInfo(pos+2, buffer, proxyPort, proxyIP, srcPlayer, playerLeaveGameChannel)
 			rewriteCrc = true
@@ -360,13 +369,29 @@ func rewriteGameStateBlock(
 	return posNextBlock
 }
 
-func rewritePacketGameState(buffer []byte, proxyIP net.IP, proxyPort int, srcPlayer util.PlayerAddr, playerLeaveGameChannel chan util.PlayerAddr) {
+func rewritePacketGameState(
+	buffer []byte,
+	proxyIP net.IP,
+	proxyPort int,
+	srcPlayer util.PlayerAddr,
+	playerInfoEventChannel chan util.PlayerInfoEvent,
+	playerLeaveGameChannel chan util.PlayerAddr,
+) {
 	pos := PacketHeaderSize
 	packetSequence := int(buffer[pos])
 	pos = pos + 1 // skip state sequence
 
 	for pos < len(buffer) {
-		pos = rewriteGameStateBlock(packetSequence, pos, buffer, proxyPort, proxyIP, srcPlayer, playerLeaveGameChannel)
+		pos = rewriteGameStateBlock(
+			packetSequence,
+			pos,
+			buffer,
+			proxyPort,
+			proxyIP,
+			srcPlayer,
+			playerInfoEventChannel,
+			playerLeaveGameChannel,
+		)
 	}
 }
 
@@ -384,7 +409,14 @@ func rewritePacketFixedPosition(buffer []byte, proxyIP net.IP, proxyPort int, of
 	}
 }
 
-func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcPlayer util.PlayerAddr, playerLeaveGameChannel chan util.PlayerAddr) {
+func RewritePacket(
+	buffer []byte,
+	proxyIP net.IP,
+	proxyPort int,
+	srcPlayer util.PlayerAddr,
+	playerInfoEventChannel chan util.PlayerInfoEvent,
+	playerLeaveGameChannel chan util.PlayerAddr,
+) {
 	// only the player who starts the game will send packets with the wrong ip address, and it will
 	// be their own. so we can search for any ip that isn't ours, replace it with ours, and replace
 	// the port with the player's assigned port
@@ -402,7 +434,7 @@ func RewritePacket(buffer []byte, proxyIP net.IP, proxyPort int, srcPlayer util.
 	case PacketType1:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType1PeerAddrOffset)
 	case PacketTypeGameState:
-		rewritePacketGameState(buffer, proxyIP, proxyPort, srcPlayer, playerLeaveGameChannel)
+		rewritePacketGameState(buffer, proxyIP, proxyPort, srcPlayer, playerInfoEventChannel, playerLeaveGameChannel)
 	case PacketType6:
 		rewritePacketFixedPosition(buffer, proxyIP, proxyPort, PacketType6PeerAddrOffset)
 	case PacketType7:

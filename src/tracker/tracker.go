@@ -144,7 +144,7 @@ func pingGameInfo(
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			buffer, err := hex.DecodeString("426f6c6f0099070d")
+			buffer, err := hex.DecodeString("426f6c6f6599080d")
 			if err != nil {
 				break
 			}

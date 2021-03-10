@@ -90,7 +90,7 @@ func verifyBoloSignature(msg []byte) bool {
 }
 
 func verifyBoloVersion(msg []byte) bool {
-	return bytes.Equal(msg[4:7], []byte{0x00, 0x99, 0x07})
+	return bytes.Equal(msg[4:7], []byte{0x65, 0x99, 0x08})
 }
 
 func GetPacketType(msg []byte) int {

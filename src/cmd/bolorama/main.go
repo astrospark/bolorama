@@ -214,7 +214,7 @@ func natProbe(context *state.ServerContext, srcPlayer state.Player, dstPlayer st
 	binary.BigEndian.PutUint16(portBytes[:], uint16(srcPlayer.ProxyPort))
 	ipHex := hex.EncodeToString(context.ProxyIpAddr.To4())
 	portHex := hex.EncodeToString(portBytes[:])
-	packetHex := "426f6c6f00990706ffff0123" + ipHex + portHex + "456789ab"
+	packetHex := "426f6c6f65990806ffff0123" + ipHex + portHex + "456789ab"
 	buffer, err := hex.DecodeString(packetHex)
 	if err != nil {
 		return

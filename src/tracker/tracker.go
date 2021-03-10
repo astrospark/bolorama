@@ -3,6 +3,7 @@ package tracker
 import (
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -20,26 +21,31 @@ func Tracker(
 ) {
 	defer context.WaitGroup.Done()
 	defer func() {
-		fmt.Println("Stopped tracker goroutine")
+		fmt.Println("Stopped tracker")
 	}()
 	udpPacketChannel := make(chan proxy.UdpPacket)
 	tcpRequestChannel := make(chan net.Conn)
 	playerPongChannel := make(chan util.PlayerAddr)
 	playerPingTimeoutChannel := make(chan util.PlayerAddr)
+	trackerShutdownChannel := make(chan struct{})
 	hostname := config.GetValueString("hostname")
 	port := config.GetValueInt("tracker_port")
 	proxyIp := util.GetOutboundIp()
+	wg := sync.WaitGroup{}
 
-	udpConnection := connectUdp(port)
+	wg.Add(3)
+	go udpListener(&wg, context.ShutdownChannel, context.UdpConnection, port, udpPacketChannel)
+	go tcpListener(&wg, context.ShutdownChannel, port, tcpRequestChannel)
+	go pingTimeout(&wg, context.ShutdownChannel, playerPongChannel, playerPingTimeoutChannel)
 
-	context.WaitGroup.Add(3)
-	go udpListener(context.WaitGroup, context.ShutdownChannel, udpConnection, port, udpPacketChannel)
-	go tcpListener(context.WaitGroup, context.ShutdownChannel, port, tcpRequestChannel)
-	go pingTimeout(context.WaitGroup, context.ShutdownChannel, playerPongChannel, playerPingTimeoutChannel)
+	go func() {
+		wg.Wait()
+		close(trackerShutdownChannel)
+	}()
 
 	for {
 		select {
-		case _, ok := <-context.ShutdownChannel:
+		case _, ok := <-trackerShutdownChannel:
 			if !ok {
 				return
 			}
@@ -48,15 +54,15 @@ func Tracker(
 			if err == nil {
 				playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
 			}
-			handleGameInfoPacket(context, udpConnection, proxyIp, packet, playerPongChannel)
+			handleGameInfoPacket(context, proxyIp, port, packet, playerPongChannel)
 		case conn := <-tcpRequestChannel:
 			conn.Write([]byte(getTrackerText(context, hostname)))
 			conn.Close()
 		case player := <-startPlayerPingChannel:
 			playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
-			go pingGameInfo(udpConnection, player, context.ShutdownChannel)
+			go pingGameInfo(context.UdpConnection, player, context.ShutdownChannel)
 		case playerAddr := <-playerPingTimeoutChannel:
-			fmt.Printf("Player timed out %s:%d\n", playerAddr.IpAddr, playerAddr.IpPort)
+			log.Printf("Player timed out %s:%d\n", playerAddr.IpAddr, playerAddr.IpPort)
 			state.PlayerDelete(context, playerAddr, true)
 			state.PrintServerState(context, true)
 		}
@@ -65,8 +71,8 @@ func Tracker(
 
 func handleGameInfoPacket(
 	context *state.ServerContext,
-	udpConnection *net.UDPConn,
 	proxyIp net.IP,
+	trackerPort int,
 	packet proxy.UdpPacket,
 	playerPongChannel chan util.PlayerAddr,
 ) {
@@ -104,11 +110,14 @@ func handleGameInfoPacket(
 	if err == nil {
 		if player.GameId != newGameInfo.GameId {
 			state.PlayerJoinGame(context, player.ProxyPort, newGameInfo.GameId, false)
+			if player.NatPort != trackerPort {
+				state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, 0, false)
+			}
 		}
 	} else {
-		player = state.PlayerNew(context, packet.SrcAddr, newGameInfo.GameId, false)
+		player = state.PlayerNew(context, packet.SrcAddr, newGameInfo.GameId, trackerPort, false)
 		playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
-		go pingGameInfo(udpConnection, player, context.ShutdownChannel)
+		go pingGameInfo(context.UdpConnection, player, context.ShutdownChannel)
 		if newGame {
 			state.PlayerSetId(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, 0, false)
 		}

@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"git.astrospark.com/bolorama/bolo"
 	"git.astrospark.com/bolorama/proxy"
@@ -16,6 +17,8 @@ type ServerContext struct {
 	Players         []Player
 	Games           map[bolo.GameId]bolo.GameInfo
 	ProxyIpAddr     net.IP
+	ProxyPort       int
+	UdpConnection   *net.UDPConn
 	RxChannel       chan proxy.UdpPacket
 	ShutdownChannel chan struct{}
 	WaitGroup       *sync.WaitGroup
@@ -32,17 +35,38 @@ type Player struct {
 	GameId            bolo.GameId
 	PlayerId          int
 	Name              string
+	Peers             map[int]time.Time
+	PeerPackets       map[int]proxy.UdpPacket
+	NatPort           int
 }
 
-func InitContext() *ServerContext {
+func InitContext(port int) *ServerContext {
 	return &ServerContext{
 		Games:           make(map[bolo.GameId]bolo.GameInfo),
 		ProxyIpAddr:     util.GetOutboundIp(),
+		ProxyPort:       port,
+		UdpConnection:   connectUdp(port),
 		RxChannel:       make(chan proxy.UdpPacket),
 		ShutdownChannel: make(chan struct{}),
 		WaitGroup:       &sync.WaitGroup{},
 		Mutex:           &sync.RWMutex{},
 	}
+}
+
+func connectUdp(port int) *net.UDPConn {
+	listenAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprint(":", port))
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	connection, err := net.ListenUDP("udp4", listenAddr)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	return connection
 }
 
 func SprintServerState(context *ServerContext, newline string, lock bool) string {
@@ -135,7 +159,13 @@ func PlayerGetByPort(context *ServerContext, port int, lock bool) (Player, error
 	return Player{}, fmt.Errorf("player with proxy port %d not found", port)
 }
 
-func PlayerNew(context *ServerContext, playerAddr net.UDPAddr, gameId bolo.GameId, lock bool) Player {
+func PlayerNew(
+	context *ServerContext,
+	playerAddr net.UDPAddr,
+	gameId bolo.GameId,
+	natPort int,
+	lock bool,
+) Player {
 	if lock {
 		context.Mutex.Lock()
 		defer context.Mutex.Unlock()
@@ -161,6 +191,9 @@ func PlayerNew(context *ServerContext, playerAddr net.UDPAddr, gameId bolo.GameI
 		GameId:            gameId,
 		PlayerId:          -1,
 		Name:              "<unknown>",
+		Peers:             make(map[int]time.Time),
+		PeerPackets:       make(map[int]proxy.UdpPacket),
+		NatPort:           natPort,
 	}
 
 	context.Players = append(context.Players, player)
@@ -221,6 +254,25 @@ func PlayerDelete(context *ServerContext, playerAddr util.PlayerAddr, lock bool)
 	proxy.DeletePort(context.Players[player_idx].ProxyPort)
 	context.Players = playerRemoveElement(context.Players, player_idx)
 	GameUpdatePlayerCount(context, gameId, false)
+}
+
+func PlayerSetNatPort(context *ServerContext, addr util.PlayerAddr, natPort int, lock bool) {
+	if lock {
+		context.Mutex.Lock()
+		defer context.Mutex.Unlock()
+	}
+
+	playerIdx := -1
+	for i, player := range context.Players {
+		if (addr.IpAddr == player.IpAddr.String()) && (addr.IpPort == player.IpPort) && (addr.ProxyPort == player.ProxyPort) {
+			playerIdx = i
+			break
+		}
+	}
+
+	if playerIdx >= 0 {
+		context.Players[playerIdx].NatPort = natPort
+	}
 }
 
 func PlayerSetId(context *ServerContext, addr util.PlayerAddr, playerId int, lock bool) {

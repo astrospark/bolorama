@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"git.astrospark.com/bolorama/bolo"
 	"git.astrospark.com/bolorama/config"
@@ -26,13 +29,44 @@ func initSignalHandler(shutdownChannel chan struct{}) {
 	}()
 }
 
+func listenNetShutdown(shutdownChannel chan struct{}) {
+	listenAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprint(":", 49999))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	connection, err := net.ListenUDP("udp4", listenAddr)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	const bufferSize = 1024
+	buffer := make([]byte, bufferSize)
+
+	_, _, err = connection.ReadFromUDP(buffer)
+	if err != nil {
+		if !strings.HasSuffix(err.Error(), "use of closed network connection") {
+			fmt.Println(err)
+		}
+		fmt.Println("Stopped listening on UDP port", 49999)
+	}
+
+	connection.Close()
+	close(shutdownChannel)
+}
+
 func main() {
 	proxyHostname := config.GetValueString("hostname")
+	trackerPort := config.GetValueInt("tracker_port")
 
-	context := state.InitContext()
+	context := state.InitContext(trackerPort)
 	playerInfoEventChannel := make(chan util.PlayerInfoEvent)
 	playerLeaveGameChannel := make(chan util.PlayerAddr)
 	startPlayerPingChannel := make(chan state.Player)
+	beginShutdownChannel := make(chan struct{})
+	mainShutdownChannel := make(chan struct{})
 
 	fmt.Println("Hostname:", proxyHostname)
 	fmt.Println("IP Address:", context.ProxyIpAddr)
@@ -41,7 +75,8 @@ func main() {
 		fmt.Println("Shutdown completed")
 	}()
 
-	initSignalHandler(context.ShutdownChannel)
+	initSignalHandler(beginShutdownChannel)
+	go listenNetShutdown(beginShutdownChannel)
 
 	context.WaitGroup.Add(1)
 	go tracker.Tracker(
@@ -49,10 +84,18 @@ func main() {
 		startPlayerPingChannel,
 	)
 
+	go func() {
+		<-beginShutdownChannel
+		fmt.Println("Shutting down")
+		close(context.ShutdownChannel)
+		context.WaitGroup.Wait()
+		close(mainShutdownChannel)
+	}()
+
 loop:
 	for {
 		select {
-		case _, ok := <-context.ShutdownChannel:
+		case _, ok := <-mainShutdownChannel:
 			if !ok {
 				break loop
 			}
@@ -69,8 +112,6 @@ loop:
 			processPacket(context, packet, startPlayerPingChannel, playerInfoEventChannel, playerLeaveGameChannel)
 		}
 	}
-
-	context.WaitGroup.Wait()
 }
 
 func processPacket(
@@ -99,10 +140,9 @@ func processPacket(
 		return
 	}
 
-	// get proxy port by source player ip
 	srcPlayer, err := state.PlayerGetByAddr(context, packet.SrcAddr, false)
 	if err != nil {
-		srcPlayer = state.PlayerNew(context, packet.SrcAddr, dstPlayer.GameId, false)
+		srcPlayer = state.PlayerNew(context, packet.SrcAddr, dstPlayer.GameId, dstPlayer.ProxyPort, false)
 		startPlayerPingChannel <- srcPlayer
 		state.PrintServerState(context, false)
 	}
@@ -113,9 +153,86 @@ func processPacket(
 		}
 	}
 
+	if packetType == bolo.PacketType5 || packetType == bolo.PacketType6 || packetType == bolo.PacketType7 {
+		srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
+		dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
+		timestamp := maxTime(srcTimestamp, dstTimestamp)
+
+		natStatus := "?"
+		if time.Since(timestamp).Seconds() < 20 {
+			natStatus = "*"
+		}
+
+		fmt.Printf("%s PacketType=%d %d (%s:%d) -> %d (%s:%d)\n", natStatus, packetType,
+			srcPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort,
+			dstPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort,
+		)
+		fmt.Printf("    Timestamp=%s\n", timestamp)
+	}
+
+	if packetType == bolo.PacketType7 {
+		if bytes.Equal(packet.Buffer[10:12], []byte{0x01, 0x23}) {
+			if bytes.Equal(packet.Buffer[18:22], []byte{0x45, 0x67, 0x89, 0xab}) {
+				fmt.Printf("received nat probe reply (%d -> %d, %s:%d -> %s:%d)\n", srcPlayer.ProxyPort, dstPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort)
+				savedPacket := srcPlayer.PeerPackets[dstPlayer.ProxyPort]
+				fmt.Printf("  packet length = %d\n", len(savedPacket.Buffer))
+				fmt.Printf("  forwarding PacketType=%d (%d -> %d, %s:%d -> %s:%d)\n", bolo.GetPacketType(savedPacket.Buffer), dstPlayer.ProxyPort, srcPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort)
+				delete(srcPlayer.PeerPackets, dstPlayer.ProxyPort)
+				srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
+				context.Mutex.Unlock()
+				go forwardPacket(savedPacket, context.ProxyIpAddr, dstPlayer, srcPlayer, playerInfoEventChannel, playerLeaveGameChannel)
+				return
+			}
+		}
+	}
+
+	srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
+	dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
+	timestamp := maxTime(srcTimestamp, dstTimestamp)
+	if time.Since(timestamp).Seconds() > 20 {
+		fmt.Printf("sending nat probe to %s:%d\n", dstPlayer.IpAddr.String(), dstPlayer.IpPort)
+		dstPlayer.PeerPackets[srcPlayer.ProxyPort] = packet
+		natProbe(context, srcPlayer, dstPlayer, false)
+		context.Mutex.Unlock()
+		return
+	}
+
+	srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
+
+	// DEBUG
+	state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: srcPlayer.IpAddr.String(), IpPort: srcPlayer.IpPort, ProxyPort: srcPlayer.ProxyPort}, dstPlayer.ProxyPort, false)
+
 	context.Mutex.Unlock()
 
 	go forwardPacket(packet, context.ProxyIpAddr, srcPlayer, dstPlayer, playerInfoEventChannel, playerLeaveGameChannel)
+}
+
+func natProbe(context *state.ServerContext, srcPlayer state.Player, dstPlayer state.Player, lock bool) {
+	var portBytes [2]byte
+	trackerPort := config.GetValueInt("tracker_port")
+
+	binary.BigEndian.PutUint16(portBytes[:], uint16(srcPlayer.ProxyPort))
+	ipHex := hex.EncodeToString(context.ProxyIpAddr.To4())
+	portHex := hex.EncodeToString(portBytes[:])
+	packetHex := "426f6c6f00990706ffff0123" + ipHex + portHex + "456789ab"
+	buffer, err := hex.DecodeString(packetHex)
+	if err != nil {
+		return
+	}
+
+	dstAddr := &net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
+	if dstPlayer.NatPort == trackerPort {
+		context.UdpConnection.WriteToUDP(buffer, dstAddr)
+	} else {
+		natPlayer, err := state.PlayerGetByPort(context, dstPlayer.NatPort, lock)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("  before send (from %d)\n", natPlayer.ProxyPort)
+		natPlayer.TxChannel <- proxy.UdpPacket{DstAddr: *dstAddr, Buffer: buffer}
+		fmt.Printf("  after send\n")
+	}
 }
 
 func forwardPacket(
@@ -147,4 +264,11 @@ func forwardPacket(
 
 	packet.DstAddr = net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
 	srcPlayer.TxChannel <- packet
+}
+
+func maxTime(a time.Time, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }

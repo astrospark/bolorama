@@ -13,22 +13,6 @@ import (
 // "safe" is defined as “guaranteed to be able to be reassembled, if fragmented."
 const bufferSize = 1024
 
-func connectUdp(port int) *net.UDPConn {
-	listenAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprint(":", port))
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-
-	connection, err := net.ListenUDP("udp4", listenAddr)
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-
-	return connection
-}
-
 func udpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, connection *net.UDPConn, port int, dataChannel chan proxy.UdpPacket) {
 	defer wg.Done()
 

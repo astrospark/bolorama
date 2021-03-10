@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -118,7 +119,7 @@ func newPlayerRoute(addr net.UDPAddr, port int, rxChannel chan UdpPacket, discon
 
 func createPlayerProxy(wg *sync.WaitGroup, playerRoute Route, shutdownChannel chan struct{}) {
 	fmt.Println()
-	fmt.Printf("Creating proxy: %d => %s:%d\n", playerRoute.ProxyPort,
+	log.Printf("Creating proxy: %d => %s:%d\n", playerRoute.ProxyPort,
 		playerRoute.PlayerIPAddr.IP.String(), playerRoute.PlayerIPAddr.Port)
 
 	listenAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprint(":", playerRoute.ProxyPort))

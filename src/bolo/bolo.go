@@ -16,6 +16,9 @@ import (
 const PacketHeaderSize = 8
 const boloSignature = "Bolo"
 
+const hexPacketSignature = "426f6c6f"
+const hexPacketVersion = "659908"
+
 const PacketTypeOffset = 0x07
 const PacketType0 = 0x00
 const PacketType1 = 0x01
@@ -111,6 +114,27 @@ func ValidatePacket(packet proxy.UdpPacket) (bool, string) {
 	}
 
 	return true, ""
+}
+
+func MarshalPacketType6(ipAddr net.IP, port int) []byte {
+	var portBytes [2]byte
+	binary.BigEndian.PutUint16(portBytes[:], uint16(port))
+	ipHex := hex.EncodeToString(ipAddr.To4())
+	portHex := hex.EncodeToString(portBytes[:])
+	packetHex := hexPacketSignature + hexPacketVersion + "06ffff0123" + ipHex + portHex + "456789ab"
+	buffer, err := hex.DecodeString(packetHex)
+	if err != nil {
+		return []byte{}
+	}
+	return buffer
+}
+
+func MarshalPacketTypeD() []byte {
+	buffer, err := hex.DecodeString(hexPacketSignature + hexPacketVersion + "0d")
+	if err != nil {
+		return []byte{}
+	}
+	return buffer
 }
 
 func RewritePacketGameInfo(buffer []byte, ip net.IP) {

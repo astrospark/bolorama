@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -201,7 +200,7 @@ func processPacket(
 	timestamp := util.MaxTime(srcTimestamp, dstTimestamp)
 	if time.Since(timestamp).Seconds() > 20 {
 		dstPlayer.PeerPackets[srcPlayer.ProxyPort] = packet
-		natProbe(context, srcPlayer, dstPlayer, false)
+		natProbe(context, dstPlayer, srcPlayer.ProxyPort, false)
 		context.Mutex.Unlock()
 		return
 	}
@@ -213,19 +212,9 @@ func processPacket(
 	go forwardPacket(packet, context.ProxyIpAddr, srcPlayer, dstPlayer, playerInfoEventChannel, playerLeaveGameChannel)
 }
 
-func natProbe(context *state.ServerContext, srcPlayer state.Player, dstPlayer state.Player, lock bool) {
-	var portBytes [2]byte
+func natProbe(context *state.ServerContext, dstPlayer state.Player, targetProxyPort int, lock bool) {
 	trackerPort := config.GetValueInt("tracker_port")
-
-	binary.BigEndian.PutUint16(portBytes[:], uint16(srcPlayer.ProxyPort))
-	ipHex := hex.EncodeToString(context.ProxyIpAddr.To4())
-	portHex := hex.EncodeToString(portBytes[:])
-	packetHex := "426f6c6f65990806ffff0123" + ipHex + portHex + "456789ab"
-	buffer, err := hex.DecodeString(packetHex)
-	if err != nil {
-		return
-	}
-
+	buffer := bolo.MarshalPacketType6(context.ProxyIpAddr, targetProxyPort)
 	dstAddr := &net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
 
 	if context.Debug {

@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -144,10 +143,7 @@ func pingGameInfo(
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			buffer, err := hex.DecodeString("426f6c6f6599080d")
-			if err != nil {
-				break
-			}
+			buffer := bolo.MarshalPacketTypeD()
 			dstAddr := &net.UDPAddr{IP: player.IpAddr, Port: player.IpPort}
 			connection.WriteToUDP(buffer, dstAddr)
 		}

@@ -15,16 +15,17 @@ import (
 )
 
 type ServerContext struct {
-	Players         []Player
-	Games           map[bolo.GameId]bolo.GameInfo
-	ProxyIpAddr     net.IP
-	ProxyPort       int
-	UdpConnection   *net.UDPConn
-	RxChannel       chan proxy.UdpPacket
-	ShutdownChannel chan struct{}
-	WaitGroup       *sync.WaitGroup
-	Mutex           *sync.RWMutex
-	Debug           bool
+	Players           []Player
+	Games             map[bolo.GameId]bolo.GameInfo
+	ProxyIpAddr       net.IP
+	ProxyPort         int
+	UdpConnection     *net.UDPConn
+	RxChannel         chan proxy.UdpPacket
+	PlayerPongChannel chan util.PlayerAddr
+	ShutdownChannel   chan struct{}
+	WaitGroup         *sync.WaitGroup
+	Mutex             *sync.RWMutex
+	Debug             bool
 }
 
 type Player struct {
@@ -45,15 +46,16 @@ type Player struct {
 func InitContext(port int) *ServerContext {
 	debug := config.GetValueBool("debug")
 	return &ServerContext{
-		Games:           make(map[bolo.GameId]bolo.GameInfo),
-		ProxyIpAddr:     util.GetOutboundIp(),
-		ProxyPort:       port,
-		UdpConnection:   connectUdp(port),
-		RxChannel:       make(chan proxy.UdpPacket),
-		ShutdownChannel: make(chan struct{}),
-		WaitGroup:       &sync.WaitGroup{},
-		Mutex:           &sync.RWMutex{},
-		Debug:           debug,
+		Games:             make(map[bolo.GameId]bolo.GameInfo),
+		ProxyIpAddr:       util.GetOutboundIp(),
+		ProxyPort:         port,
+		UdpConnection:     connectUdp(port),
+		PlayerPongChannel: make(chan util.PlayerAddr),
+		RxChannel:         make(chan proxy.UdpPacket),
+		ShutdownChannel:   make(chan struct{}),
+		WaitGroup:         &sync.WaitGroup{},
+		Mutex:             &sync.RWMutex{},
+		Debug:             debug,
 	}
 }
 

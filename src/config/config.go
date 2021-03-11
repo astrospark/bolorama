@@ -17,6 +17,7 @@ var configMap map[string]string = nil
 var defaults = map[string]string{
 	"debug":                  "false",
 	"game_info_ping_seconds": "20",
+	"player_timeout_seconds": "60",
 	"tracker_port":           "50000",
 }
 
@@ -24,6 +25,7 @@ var valid []string = []string{
 	"debug",
 	"hostname",
 	"game_info_ping_seconds",
+	"player_timeout_seconds",
 	"tracker_port",
 }
 

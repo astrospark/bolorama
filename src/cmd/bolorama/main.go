@@ -146,6 +146,8 @@ func processPacket(
 		state.PrintServerState(context, false)
 	}
 
+	context.PlayerPongChannel <- util.PlayerAddr{IpAddr: srcPlayer.IpAddr.String(), IpPort: srcPlayer.IpPort, ProxyPort: srcPlayer.ProxyPort}
+
 	if packetType == bolo.PacketType5 {
 		if srcPlayer.GameId != dstPlayer.GameId {
 			state.PlayerJoinGame(context, srcPlayer.ProxyPort, dstPlayer.GameId, false)

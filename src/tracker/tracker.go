@@ -24,7 +24,6 @@ func Tracker(
 	}()
 	udpPacketChannel := make(chan proxy.UdpPacket)
 	tcpRequestChannel := make(chan net.Conn)
-	playerPongChannel := make(chan util.PlayerAddr)
 	playerPingTimeoutChannel := make(chan util.PlayerAddr)
 	trackerShutdownChannel := make(chan struct{})
 	hostname := config.GetValueString("hostname")
@@ -35,7 +34,7 @@ func Tracker(
 	wg.Add(3)
 	go udpListener(&wg, context.ShutdownChannel, context.UdpConnection, port, udpPacketChannel)
 	go tcpListener(&wg, context.ShutdownChannel, port, tcpRequestChannel)
-	go pingTimeout(&wg, context.ShutdownChannel, playerPongChannel, playerPingTimeoutChannel)
+	go pingTimeout(&wg, context.ShutdownChannel, context.PlayerPongChannel, playerPingTimeoutChannel)
 
 	go func() {
 		wg.Wait()
@@ -51,14 +50,14 @@ func Tracker(
 		case packet := <-udpPacketChannel:
 			player, err := state.PlayerGetByAddr(context, packet.SrcAddr, true)
 			if err == nil {
-				playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
+				context.PlayerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
 			}
-			handleGameInfoPacket(context, proxyIp, port, packet, playerPongChannel)
+			handleGameInfoPacket(context, proxyIp, port, packet, context.PlayerPongChannel)
 		case conn := <-tcpRequestChannel:
 			conn.Write([]byte(getTrackerText(context, hostname)))
 			conn.Close()
 		case player := <-startPlayerPingChannel:
-			playerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
+			context.PlayerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
 			go pingGameInfo(context.UdpConnection, player, context.ShutdownChannel)
 		case playerAddr := <-playerPingTimeoutChannel:
 			log.Printf("Player timed out %s:%d\n", playerAddr.IpAddr, playerAddr.IpPort)
@@ -157,10 +156,9 @@ func pingTimeout(
 	playerPingTimeoutChannel chan util.PlayerAddr,
 ) {
 	defer wg.Done()
-	gameInfoPingDuration := time.Duration(config.GetValueInt("game_info_ping_seconds")) * time.Second
-	gameInfoTimeoutDuration := gameInfoPingDuration + (5 * time.Second)
+	playerTimeoutDuration := time.Duration(config.GetValueInt("player_timeout_seconds")) * time.Second
 	mapPlayerTimestamp := make(map[util.PlayerAddr]time.Time)
-	ticker := time.NewTicker(gameInfoPingDuration / 4)
+	ticker := time.NewTicker(playerTimeoutDuration / 4)
 
 	for {
 		select {
@@ -171,7 +169,7 @@ func pingTimeout(
 			mapPlayerTimestamp[playerAddr] = time.Now()
 		case <-ticker.C:
 			for playerAddr, timestamp := range mapPlayerTimestamp {
-				if time.Now().After(timestamp.Add(gameInfoTimeoutDuration)) {
+				if time.Now().After(timestamp.Add(playerTimeoutDuration)) {
 					playerPingTimeoutChannel <- playerAddr
 					delete(mapPlayerTimestamp, playerAddr)
 				}

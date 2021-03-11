@@ -197,6 +197,10 @@ func processPacket(
 		}
 	}
 
+	if srcPlayer.NatPort != context.ProxyPort {
+		natProbe(context, srcPlayer, context.ProxyPort, false)
+	}
+
 	srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
 	dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
 	timestamp := util.MaxTime(srcTimestamp, dstTimestamp)

@@ -81,8 +81,21 @@ func handleGameInfoPacket(
 	}
 
 	packetType := bolo.GetPacketType(packet.Buffer)
+
+	if packetType == bolo.PacketType7 {
+		context.Mutex.Lock()
+		player, err := state.PlayerGetByAddr(context, packet.SrcAddr, false)
+		if err == nil {
+			if player.NatPort != trackerPort {
+				state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, trackerPort, false)
+			}
+		}
+		context.Mutex.Unlock()
+		return
+	}
+
 	if packetType != bolo.PacketTypeGameInfo {
-		// ignore all packets except gameinfo ones
+		// ignore all packets except types 7 and game info
 		return
 	}
 
@@ -108,9 +121,9 @@ func handleGameInfoPacket(
 	if err == nil {
 		if player.GameId != newGameInfo.GameId {
 			state.PlayerJoinGame(context, player.ProxyPort, newGameInfo.GameId, false)
-			if player.NatPort != trackerPort {
-				state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, 0, false)
-			}
+		}
+		if player.NatPort != trackerPort {
+			state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}, trackerPort, false)
 		}
 	} else {
 		player = state.PlayerNew(context, packet.SrcAddr, newGameInfo.GameId, trackerPort, false)

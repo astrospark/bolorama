@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"git.astrospark.com/bolorama/bolo"
+	"git.astrospark.com/bolorama/config"
 	"git.astrospark.com/bolorama/proxy"
 	"git.astrospark.com/bolorama/util"
 )
@@ -23,6 +24,7 @@ type ServerContext struct {
 	ShutdownChannel chan struct{}
 	WaitGroup       *sync.WaitGroup
 	Mutex           *sync.RWMutex
+	Debug           bool
 }
 
 type Player struct {
@@ -41,6 +43,7 @@ type Player struct {
 }
 
 func InitContext(port int) *ServerContext {
+	debug := config.GetValueBool("debug")
 	return &ServerContext{
 		Games:           make(map[bolo.GameId]bolo.GameInfo),
 		ProxyIpAddr:     util.GetOutboundIp(),
@@ -50,6 +53,7 @@ func InitContext(port int) *ServerContext {
 		ShutdownChannel: make(chan struct{}),
 		WaitGroup:       &sync.WaitGroup{},
 		Mutex:           &sync.RWMutex{},
+		Debug:           debug,
 	}
 }
 

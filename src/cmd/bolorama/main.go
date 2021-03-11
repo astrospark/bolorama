@@ -153,30 +153,40 @@ func processPacket(
 		}
 	}
 
-	if packetType == bolo.PacketType5 || packetType == bolo.PacketType6 || packetType == bolo.PacketType7 {
-		srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
-		dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
-		timestamp := maxTime(srcTimestamp, dstTimestamp)
+	if context.Debug {
+		if packetType == bolo.PacketType5 || packetType == bolo.PacketType6 || packetType == bolo.PacketType7 {
+			srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
+			dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
+			timestamp := util.MaxTime(srcTimestamp, dstTimestamp)
 
-		natStatus := "?"
-		if time.Since(timestamp).Seconds() < 20 {
-			natStatus = "*"
+			natStatus := "?"
+			if time.Since(timestamp).Seconds() < 20 {
+				natStatus = "*"
+			}
+
+			fmt.Printf("%s PacketType=%d %d (%s:%d) -> %d (%s:%d)\n", natStatus, packetType,
+				srcPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort,
+				dstPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort,
+			)
+			fmt.Printf("    Timestamp=%s\n", timestamp)
 		}
-
-		fmt.Printf("%s PacketType=%d %d (%s:%d) -> %d (%s:%d)\n", natStatus, packetType,
-			srcPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort,
-			dstPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort,
-		)
-		fmt.Printf("    Timestamp=%s\n", timestamp)
 	}
 
 	if packetType == bolo.PacketType7 {
 		if bytes.Equal(packet.Buffer[10:12], []byte{0x01, 0x23}) {
 			if bytes.Equal(packet.Buffer[18:22], []byte{0x45, 0x67, 0x89, 0xab}) {
-				fmt.Printf("received nat probe reply (%d -> %d, %s:%d -> %s:%d)\n", srcPlayer.ProxyPort, dstPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort)
-				savedPacket := srcPlayer.PeerPackets[dstPlayer.ProxyPort]
-				fmt.Printf("  packet length = %d\n", len(savedPacket.Buffer))
-				fmt.Printf("  forwarding PacketType=%d (%d -> %d, %s:%d -> %s:%d)\n", bolo.GetPacketType(savedPacket.Buffer), dstPlayer.ProxyPort, srcPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort)
+				savedPacket, ok := srcPlayer.PeerPackets[dstPlayer.ProxyPort]
+				if !ok {
+					fmt.Printf("received nat probe reply (%d -> %d, %s:%d -> %s:%d)\n", srcPlayer.ProxyPort, dstPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort)
+					fmt.Printf("  error: no saved packet")
+					context.Mutex.Unlock()
+					return
+				}
+				if context.Debug {
+					fmt.Printf("received nat probe reply (%d -> %d, %s:%d -> %s:%d)\n", srcPlayer.ProxyPort, dstPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort)
+					fmt.Printf("  packet length = %d\n", len(savedPacket.Buffer))
+					fmt.Printf("  forwarding PacketType=%d (%d -> %d, %s:%d -> %s:%d)\n", bolo.GetPacketType(savedPacket.Buffer), dstPlayer.ProxyPort, srcPlayer.ProxyPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort)
+				}
 				delete(srcPlayer.PeerPackets, dstPlayer.ProxyPort)
 				srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
 				context.Mutex.Unlock()
@@ -188,9 +198,8 @@ func processPacket(
 
 	srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
 	dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
-	timestamp := maxTime(srcTimestamp, dstTimestamp)
+	timestamp := util.MaxTime(srcTimestamp, dstTimestamp)
 	if time.Since(timestamp).Seconds() > 20 {
-		fmt.Printf("sending nat probe to %s:%d\n", dstPlayer.IpAddr.String(), dstPlayer.IpPort)
 		dstPlayer.PeerPackets[srcPlayer.ProxyPort] = packet
 		natProbe(context, srcPlayer, dstPlayer, false)
 		context.Mutex.Unlock()
@@ -198,9 +207,6 @@ func processPacket(
 	}
 
 	srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
-
-	// DEBUG
-	state.PlayerSetNatPort(context, util.PlayerAddr{IpAddr: srcPlayer.IpAddr.String(), IpPort: srcPlayer.IpPort, ProxyPort: srcPlayer.ProxyPort}, dstPlayer.ProxyPort, false)
 
 	context.Mutex.Unlock()
 
@@ -221,7 +227,15 @@ func natProbe(context *state.ServerContext, srcPlayer state.Player, dstPlayer st
 	}
 
 	dstAddr := &net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
+
+	if context.Debug {
+		fmt.Printf("sending nat probe to %s:%d (target port: %d)\n", dstPlayer.IpAddr.String(), dstPlayer.IpPort, targetProxyPort)
+	}
+
 	if dstPlayer.NatPort == trackerPort {
+		if context.Debug {
+			fmt.Printf("  (nat probe source port: %d)\n", trackerPort)
+		}
 		context.UdpConnection.WriteToUDP(buffer, dstAddr)
 	} else {
 		natPlayer, err := state.PlayerGetByPort(context, dstPlayer.NatPort, lock)
@@ -229,9 +243,10 @@ func natProbe(context *state.ServerContext, srcPlayer state.Player, dstPlayer st
 			fmt.Println(err)
 			return
 		}
-		fmt.Printf("  before send (from %d)\n", natPlayer.ProxyPort)
+		if context.Debug {
+			fmt.Printf("  (nat probe source port: %d)\n", natPlayer.ProxyPort)
+		}
 		natPlayer.TxChannel <- proxy.UdpPacket{DstAddr: *dstAddr, Buffer: buffer}
-		fmt.Printf("  after send\n")
 	}
 }
 
@@ -264,11 +279,4 @@ func forwardPacket(
 
 	packet.DstAddr = net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
 	srcPlayer.TxChannel <- packet
-}
-
-func maxTime(a time.Time, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
 }

@@ -6,13 +6,31 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"git.astrospark.com/bolorama/util"
 )
 
 const configFilename = "config.txt"
 
 var configMap map[string]string = nil
 
-var valid []string = []string{"hostname", "tracker_port"}
+var defaults = map[string]string{
+	"debug":                  "false",
+	"game_info_ping_seconds": "20",
+	"tracker_port":           "50000",
+}
+
+var valid []string = []string{
+	"debug",
+	"hostname",
+	"game_info_ping_seconds",
+	"tracker_port",
+}
+
+var mapBoolValue = map[string]bool{
+	"true":  true,
+	"false": false,
+}
 
 func GetValueString(name string) string {
 	load()
@@ -33,12 +51,25 @@ func GetValueInt(name string) int {
 	return value
 }
 
+func GetValueBool(name string) bool {
+	load()
+	valueString := strings.ToLower(GetValueString(name))
+	valueBool, ok := mapBoolValue[valueString]
+	if !ok {
+		log.Fatalln("Config property is not a boolean:", name)
+	}
+	return valueBool
+}
+
 func load() {
 	if configMap != nil {
 		return
 	}
 
 	configMap = make(map[string]string)
+	for key, value := range defaults {
+		configMap[key] = value
+	}
 
 	file, err := os.Open(configFilename)
 	if err != nil {
@@ -58,7 +89,9 @@ func load() {
 		if len(s) < 2 {
 			log.Fatalln("Malformed config:", line)
 		}
-		configMap[s[0]] = s[1]
+		if util.ContainsString(valid, s[0]) {
+			configMap[s[0]] = s[1]
+		}
 	}
 
 	file.Close()

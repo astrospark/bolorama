@@ -266,15 +266,6 @@ func forwardPacket(
 		playerLeaveGameChannel,
 	)
 
-	if bytes.Contains(packet.Buffer, []byte{0xC0, 0xA8, 0x00, 0x50}) {
-		fmt.Println()
-		fmt.Println("Warning: Outgoing packet matches 192.168.0.80")
-		fmt.Printf("Src: %s:%d Dst: %s:%d\n",
-			srcPlayer.IpAddr.String(), srcPlayer.IpPort,
-			dstPlayer.IpAddr.String(), dstPlayer.IpPort)
-		fmt.Println(hex.Dump(packet.Buffer))
-	}
-
 	packet.DstAddr = net.UDPAddr{IP: dstPlayer.IpAddr, Port: dstPlayer.IpPort}
 	srcPlayer.TxChannel <- packet
 }

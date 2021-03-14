@@ -85,7 +85,7 @@ func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, play
 	sb.WriteString(fmt.Sprintf("  Bots: %s", yesNo[gameInfo.AllowComputer]))
 	sb.WriteString(fmt.Sprintf("  PW: %s\r", yesNo[gameInfo.HasPassword]))
 
-	sb.WriteString("Version: 0.99.7")
+	sb.WriteString("Version: 0.99.8")
 	sb.WriteString(fmt.Sprintf("  Tracked-For: %d minutes", gameDuration(gameInfo)))
 	sb.WriteString("  Player-List:\r")
 

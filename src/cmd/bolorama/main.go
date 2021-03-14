@@ -182,7 +182,7 @@ func processPacket(
 				savedPacket, ok := srcPlayer.PeerPackets[dstPlayer.ProxyPort]
 				if !ok {
 					fmt.Printf("received nat probe reply (%d -> %d, %s:%d -> %s:%d)\n", srcPlayer.ProxyPort, dstPlayer.ProxyPort, srcPlayer.IpAddr.String(), srcPlayer.IpPort, dstPlayer.IpAddr.String(), dstPlayer.IpPort)
-					fmt.Printf("  error: no saved packet")
+					fmt.Println("  error: no saved packet")
 					context.Mutex.Unlock()
 					return
 				}

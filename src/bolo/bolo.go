@@ -198,7 +198,7 @@ func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println()
 	fmt.Println("Game Id:", hex.EncodeToString(gameInfo.GameId[:]))
 	fmt.Println("Map Name:", gameInfo.MapName)
-	fmt.Println("Start Timestamp:", time.Unix(int64(gameInfo.StartTimestamp-seconds1904ToUnixEpoch), 0))
+	fmt.Println("Start Timestamp:", ParseBoloTimestamp(gameInfo.StartTimestamp))
 	fmt.Println("Game Type:", gameInfo.GameType)
 	fmt.Println("Allow Hidden Mines:", gameInfo.AllowHiddenMines)
 	fmt.Println("Allow Computer:", gameInfo.AllowComputer)
@@ -210,6 +210,10 @@ func PrintGameInfo(gameInfo GameInfo) {
 	fmt.Println("Neutral Base Count:", gameInfo.NeutralBaseCount)
 	fmt.Println("Password:", gameInfo.HasPassword)
 	fmt.Println()
+}
+
+func ParseBoloTimestamp(timestamp uint32) time.Time {
+	return time.Unix(int64(timestamp-seconds1904ToUnixEpoch), 0)
 }
 
 func rewriteOpcodePlayerInfo(

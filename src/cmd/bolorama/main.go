@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -13,8 +12,10 @@ import (
 
 	"git.astrospark.com/bolorama/bolo"
 	"git.astrospark.com/bolorama/config"
+	"git.astrospark.com/bolorama/data"
 	"git.astrospark.com/bolorama/proxy"
 	"git.astrospark.com/bolorama/state"
+	"git.astrospark.com/bolorama/stats"
 	"git.astrospark.com/bolorama/tracker"
 	"git.astrospark.com/bolorama/util"
 )
@@ -70,18 +71,18 @@ func main() {
 	fmt.Println("Hostname:", proxyHostname)
 	fmt.Println("IP Address:", context.ProxyIpAddr)
 
+	db := data.Init()
+
 	defer func() {
 		fmt.Println("Shutdown completed")
 	}()
 
 	initSignalHandler(beginShutdownChannel)
-	go listenNetShutdown(beginShutdownChannel)
+	//go listenNetShutdown(beginShutdownChannel)
 
-	context.WaitGroup.Add(1)
-	go tracker.Tracker(
-		context,
-		startPlayerPingChannel,
-	)
+	context.WaitGroup.Add(2)
+	go stats.Logger(context, db)
+	go tracker.Tracker(context, startPlayerPingChannel)
 
 	go func() {
 		<-beginShutdownChannel
@@ -111,6 +112,8 @@ loop:
 			processPacket(context, packet, startPlayerPingChannel, playerInfoEventChannel, playerLeaveGameChannel)
 		}
 	}
+
+	db.Close()
 }
 
 func processPacket(

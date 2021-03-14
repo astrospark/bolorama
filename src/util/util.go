@@ -33,6 +33,13 @@ func GetOutboundIp() net.IP {
 	return localAddr.IP
 }
 
+func MaxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func MaxTime(a time.Time, b time.Time) time.Time {
 	if a.After(b) {
 		return a

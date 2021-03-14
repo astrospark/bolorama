@@ -15,17 +15,20 @@ import (
 )
 
 type ServerContext struct {
-	Players           []Player
-	Games             map[bolo.GameId]bolo.GameInfo
-	ProxyIpAddr       net.IP
-	ProxyPort         int
-	UdpConnection     *net.UDPConn
-	RxChannel         chan proxy.UdpPacket
-	PlayerPongChannel chan util.PlayerAddr
-	ShutdownChannel   chan struct{}
-	WaitGroup         *sync.WaitGroup
-	Mutex             *sync.RWMutex
-	Debug             bool
+	Players               []Player
+	Games                 map[bolo.GameId]bolo.GameInfo
+	ProxyIpAddr           net.IP
+	ProxyPort             int
+	UdpConnection         *net.UDPConn
+	RxChannel             chan proxy.UdpPacket
+	PlayerPongChannel     chan util.PlayerAddr
+	LogGameEndChannel     chan bolo.GameId
+	LogPlayerJoinChannel  chan util.PlayerAddr
+	LogPlayerLeaveChannel chan util.PlayerAddr
+	ShutdownChannel       chan struct{}
+	WaitGroup             *sync.WaitGroup
+	Mutex                 *sync.RWMutex
+	Debug                 bool
 }
 
 type Player struct {
@@ -46,16 +49,19 @@ type Player struct {
 func InitContext(port int) *ServerContext {
 	debug := config.GetValueBool("debug")
 	return &ServerContext{
-		Games:             make(map[bolo.GameId]bolo.GameInfo),
-		ProxyIpAddr:       util.GetOutboundIp(),
-		ProxyPort:         port,
-		UdpConnection:     connectUdp(port),
-		PlayerPongChannel: make(chan util.PlayerAddr),
-		RxChannel:         make(chan proxy.UdpPacket),
-		ShutdownChannel:   make(chan struct{}),
-		WaitGroup:         &sync.WaitGroup{},
-		Mutex:             &sync.RWMutex{},
-		Debug:             debug,
+		Games:                 make(map[bolo.GameId]bolo.GameInfo),
+		ProxyIpAddr:           util.GetOutboundIp(),
+		ProxyPort:             port,
+		UdpConnection:         connectUdp(port),
+		PlayerPongChannel:     make(chan util.PlayerAddr),
+		RxChannel:             make(chan proxy.UdpPacket),
+		LogGameEndChannel:     make(chan bolo.GameId),
+		LogPlayerJoinChannel:  make(chan util.PlayerAddr),
+		LogPlayerLeaveChannel: make(chan util.PlayerAddr),
+		ShutdownChannel:       make(chan struct{}),
+		WaitGroup:             &sync.WaitGroup{},
+		Mutex:                 &sync.RWMutex{},
+		Debug:                 debug,
 	}
 }
 
@@ -132,6 +138,7 @@ func GameDelete(context *ServerContext, gameId bolo.GameId, lock bool) {
 	}
 
 	delete(context.Games, gameId)
+	context.LogGameEndChannel <- gameId
 }
 
 func PlayerGetByAddr(context *ServerContext, addr net.UDPAddr, lock bool) (Player, error) {
@@ -203,6 +210,7 @@ func PlayerNew(
 	}
 
 	context.Players = append(context.Players, player)
+	context.LogPlayerJoinChannel <- util.PlayerAddr{IpAddr: playerAddr.IP.String(), IpPort: playerAddr.Port, ProxyPort: proxyPort}
 
 	return player
 }
@@ -259,6 +267,7 @@ func PlayerDelete(context *ServerContext, playerAddr util.PlayerAddr, lock bool)
 	close(context.Players[player_idx].DisconnectChannel)
 	proxy.DeletePort(context.Players[player_idx].ProxyPort)
 	context.Players = playerRemoveElement(context.Players, player_idx)
+	context.LogPlayerLeaveChannel <- playerAddr
 	GameUpdatePlayerCount(context, gameId, false)
 }
 

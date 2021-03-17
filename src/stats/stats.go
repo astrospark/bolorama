@@ -51,7 +51,7 @@ func LogGames(context *state.ServerContext, db *sql.DB) {
 		games[strHash] = data.DataGame{
 			GameId:               strHash,
 			MapName:              game.MapName,
-			StartTimestamp:       strconv.FormatInt(bolo.ParseBoloTimestamp(game.StartTimestamp).Unix(), 10),
+			StartTimestamp:       strconv.FormatInt(game.ServerStartTimestamp.Unix(), 10),
 			EndTimestamp:         sql.NullString{String: "", Valid: false},
 			MaxPlayerCount:       0,
 			ElapsedPlayerMinutes: 0,

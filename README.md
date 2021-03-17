@@ -46,3 +46,11 @@ Period for disconnecting a player for network inactivity (not game inactivity). 
 #### tracker_port
 
 Port number for the tracker to listen on. Type: integer. Default: `50000`
+
+## Tips
+
+### Check Tracker From Modern Computer
+
+```
+nc bolo.astrospark.com 5000 | tr '\r' '\n'
+```

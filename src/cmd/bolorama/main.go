@@ -42,8 +42,7 @@ func listenNetShutdown(shutdownChannel chan struct{}) {
 		return
 	}
 
-	const bufferSize = 1024
-	buffer := make([]byte, bufferSize)
+	buffer := make([]byte, util.MaxUdpPacketSize)
 
 	_, _, err = connection.ReadFromUDP(buffer)
 	if err != nil {

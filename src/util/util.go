@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// The largest safe UDP packet length is 576 for IPv4 and 1280 for IPv6, where
+// "safe" is defined as “guaranteed to be able to be reassembled, if fragmented."
+const MaxUdpPacketSize = 1024
+
 type PlayerAddr struct {
 	IpAddr    string
 	IpPort    int

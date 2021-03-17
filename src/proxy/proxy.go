@@ -6,13 +6,11 @@ import (
 	"net"
 	"strings"
 	"sync"
+
+	"git.astrospark.com/bolorama/util"
 )
 
 const firstPlayerPort = 40001
-
-// The largest safe UDP packet length is 576 for IPv4 and 1280 for IPv6, where
-// "safe" is defined as “guaranteed to be able to be reassembled, if fragmented."
-const bufferSize = 1024
 
 // Route associates a proxy port with a player's real IP address + port
 type Route struct {

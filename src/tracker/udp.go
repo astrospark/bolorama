@@ -7,16 +7,13 @@ import (
 	"sync"
 
 	"git.astrospark.com/bolorama/proxy"
+	"git.astrospark.com/bolorama/util"
 )
-
-// The largest safe UDP packet length is 576 for IPv4 and 1280 for IPv6, where
-// "safe" is defined as “guaranteed to be able to be reassembled, if fragmented."
-const bufferSize = 1024
 
 func udpListener(wg *sync.WaitGroup, shutdownChannel chan struct{}, connection *net.UDPConn, port int, dataChannel chan proxy.UdpPacket) {
 	defer wg.Done()
 
-	buffer := make([]byte, bufferSize)
+	buffer := make([]byte, util.MaxUdpPacketSize)
 
 	go func() {
 		for {

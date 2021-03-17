@@ -1,3 +1,20 @@
+--[[
+	Copyright 2021 Astrospark Technologies
+
+	This file is part of bolorama. Bolorama is free software: you can
+	redistribute it and/or modify it under the terms of the GNU Affero General
+	Public License as published by the Free Software Foundation, either version
+	3 of the License, or (at your option) any later version.
+
+	Bolorama is distributed in the hope that it will be useful, but WITHOUT ANY
+	WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+	FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+	details.
+
+	You should have received a copy of the GNU Affero General Public License
+	along with Bolorama. If not, see <https://www.gnu.org/licenses/>.
+--]]
+
 bolo_protocol = Proto("Bolo",  "Bolo Protocol")
 
 ------ Field Definitions ------
@@ -423,7 +440,7 @@ function dissect_opcode_game_info(buffer, pinfo, tree) -- 0xf1
 			t:append_text(string.format(", Map: %s", map_name))
 			pos = pos + 36
 		end
-		
+
 		local host_address = buffer(pos, 4):ipv4()
 		t:append_text(string.format(", Host: %s", host_address))
 		t:add(host_address_field, buffer(pos, 4)); pos = pos + 4
@@ -807,7 +824,7 @@ function dissect_pascal_string(buffer, tree, field, fixed_length)
 
 	if (fixed_length ~= 0 and
 	    buffer_length < fixed_length + 1 and
-	    string_length > fixed_length) or 
+	    string_length > fixed_length) or
 	   string_end > buffer_length then
 		tree:add_proto_expert_info(invalid_string_length_expert)
 		return nil, 0

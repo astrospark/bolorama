@@ -80,8 +80,12 @@ func main() {
 	initSignalHandler(beginShutdownChannel)
 	//go listenNetShutdown(beginShutdownChannel)
 
-	context.WaitGroup.Add(2)
-	go stats.Logger(context, db)
+	if config.GetValueBool("enable_statistics") {
+		context.WaitGroup.Add(1)
+		go stats.Logger(context, db)
+	}
+
+	context.WaitGroup.Add(1)
 	go tracker.Tracker(context, startPlayerPingChannel)
 
 	go func() {

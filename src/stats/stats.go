@@ -20,6 +20,7 @@ const kLogIntervalSeconds = 60
 const kElapsedMinutesPerLogInterval = 1
 
 func Logger(context *state.ServerContext, db *sql.DB) {
+	defer context.WaitGroup.Done()
 	ticker := time.NewTicker(kLogIntervalSeconds * time.Second)
 
 	for {
@@ -41,7 +42,6 @@ func Logger(context *state.ServerContext, db *sql.DB) {
 }
 
 func LogGames(context *state.ServerContext, db *sql.DB) {
-	defer context.WaitGroup.Done()
 	context.Mutex.Lock()
 
 	games := make(map[string]data.DataGame)

@@ -17,6 +17,7 @@ var configMap map[string]string = nil
 var valid []string = []string{
 	"database_filename",
 	"debug",
+	"enable_statistics",
 	"hostname",
 	"game_info_ping_seconds",
 	"player_timeout_seconds",
@@ -26,6 +27,7 @@ var valid []string = []string{
 var defaults = map[string]string{
 	"database_filename":      "db.sqlite",
 	"debug":                  "false",
+	"enable_statistics":      "false",
 	"game_info_ping_seconds": "20",
 	"player_timeout_seconds": "60",
 	"tracker_port":           "50000",

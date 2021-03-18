@@ -224,17 +224,20 @@ func processPacket(
 		natProbe(context, srcPlayer, context.ProxyPort, false)
 	}
 
-	srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
-	dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
-	timestamp := util.MaxTime(srcTimestamp, dstTimestamp)
-	if time.Since(timestamp).Seconds() > 20 {
-		dstPlayer.PeerPackets[srcPlayer.ProxyPort] = packet
-		natProbe(context, dstPlayer, srcPlayer.ProxyPort, false)
-		context.Mutex.Unlock()
-		return
-	}
+	// if the player is talking to themselves (happens when they are the last player in the game), no nat traversal is needed
+	if srcPlayer.ProxyPort != dstPlayer.ProxyPort {
+		srcTimestamp := srcPlayer.Peers[dstPlayer.ProxyPort]
+		dstTimestamp := dstPlayer.Peers[srcPlayer.ProxyPort]
+		timestamp := util.MaxTime(srcTimestamp, dstTimestamp)
+		if time.Since(timestamp).Seconds() > 20 {
+			dstPlayer.PeerPackets[srcPlayer.ProxyPort] = packet
+			natProbe(context, dstPlayer, srcPlayer.ProxyPort, false)
+			context.Mutex.Unlock()
+			return
+		}
 
-	srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
+		srcPlayer.Peers[dstPlayer.ProxyPort] = time.Now()
+	}
 
 	context.Mutex.Unlock()
 

@@ -19,6 +19,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"net"
 	"os"
@@ -87,8 +88,6 @@ func main() {
 	fmt.Println("Hostname:", proxyHostname)
 	fmt.Println("IP Address:", context.ProxyIpAddr)
 
-	db := data.Init()
-
 	defer func() {
 		fmt.Println("Shutdown completed")
 	}()
@@ -96,10 +95,14 @@ func main() {
 	initSignalHandler(beginShutdownChannel)
 	//go listenNetShutdown(beginShutdownChannel)
 
+	var db *sql.DB = nil
+
 	if config.GetValueBool("enable_statistics") {
-		context.WaitGroup.Add(1)
-		go stats.Logger(context, db)
+		db = data.Init()
 	}
+
+	context.WaitGroup.Add(1)
+	go stats.Logger(context, db)
 
 	context.WaitGroup.Add(1)
 	go tracker.Tracker(context, startPlayerPingChannel)
@@ -133,7 +136,9 @@ loop:
 		}
 	}
 
-	db.Close()
+	if db != nil {
+		db.Close()
+	}
 }
 
 func processPacket(

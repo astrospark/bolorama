@@ -38,6 +38,28 @@ const kElapsedMinutesPerLogInterval = 1
 
 func Logger(context *state.ServerContext, db *sql.DB) {
 	defer context.WaitGroup.Done()
+
+	if db == nil {
+		LoggerNone(context)
+	} else {
+		LoggerSql(context, db)
+	}
+}
+
+func LoggerNone(context *state.ServerContext) {
+	for {
+		select {
+		case <-context.ShutdownChannel:
+			fmt.Println("Stopped statistics")
+			return
+		case <-context.LogGameEndChannel:
+		case <-context.LogPlayerJoinChannel:
+		case <-context.LogPlayerLeaveChannel:
+		}
+	}
+}
+
+func LoggerSql(context *state.ServerContext, db *sql.DB) {
 	ticker := time.NewTicker(kLogIntervalSeconds * time.Second)
 
 	for {

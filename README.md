@@ -43,6 +43,10 @@ This is the hostname that will appear in the tracker game info for players to co
 
 Period for disconnecting a player for network inactivity (not game inactivity). Type: integer. Default: `60`
 
+#### tracker_debug_port
+
+Port number for tracker debug data. Type: integer. Default `50001`
+
 #### tracker_port
 
 Port number for the tracker to listen on. Type: integer. Default: `50000`

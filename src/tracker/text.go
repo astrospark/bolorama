@@ -83,9 +83,11 @@ func getTrackerText(context *state.ServerContext, hostname string) string {
 		sb.WriteString(fmt.Sprintf("   There are %d games in progress.\r\r", len(games)))
 	}
 
-	sb.WriteString(state.SprintServerState(context, "\r", false))
-
 	return sb.String()
+}
+
+func getTrackerDebugText(context *state.ServerContext, hostname string) string {
+	return state.SprintServerState(context, "\r", false)
 }
 
 func getGameInfoText(hostname string, hostport int, gameInfo bolo.GameInfo, players []string) string {

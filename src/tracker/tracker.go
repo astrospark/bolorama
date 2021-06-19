@@ -40,17 +40,20 @@ func Tracker(
 		fmt.Println("Stopped tracker")
 	}()
 	udpPacketChannel := make(chan proxy.UdpPacket)
-	tcpRequestChannel := make(chan net.Conn)
+	tcpTrackerRequestChannel := make(chan net.Conn)
+	tcpTrackerDebugRequestChannel := make(chan net.Conn)
 	playerPingTimeoutChannel := make(chan util.PlayerAddr)
 	trackerShutdownChannel := make(chan struct{})
 	hostname := config.GetValueString("hostname")
 	port := config.GetValueInt("tracker_port")
+	trackerDebugPort := config.GetValueInt("tracker_debug_port")
 	proxyIp := util.GetOutboundIp()
 	wg := sync.WaitGroup{}
 
-	wg.Add(3)
+	wg.Add(4)
 	go udpListener(&wg, context.ShutdownChannel, context.UdpConnection, port, udpPacketChannel)
-	go tcpListener(&wg, context.ShutdownChannel, port, tcpRequestChannel)
+	go tcpListener(&wg, context.ShutdownChannel, port, tcpTrackerRequestChannel)
+	go tcpListener(&wg, context.ShutdownChannel, trackerDebugPort, tcpTrackerDebugRequestChannel)
 	go pingTimeout(&wg, context.ShutdownChannel, context.PlayerPongChannel, playerPingTimeoutChannel)
 
 	go func() {
@@ -70,8 +73,13 @@ func Tracker(
 				context.PlayerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}
 			}
 			handleGameInfoPacket(context, proxyIp, port, packet, context.PlayerPongChannel)
-		case conn := <-tcpRequestChannel:
+		case conn := <-tcpTrackerRequestChannel:
+			fmt.Println("tracker request")
 			conn.Write([]byte(getTrackerText(context, hostname)))
+			conn.Close()
+		case conn := <-tcpTrackerDebugRequestChannel:
+			fmt.Println("tracker debug request")
+			conn.Write([]byte(getTrackerDebugText(context, hostname)))
 			conn.Close()
 		case player := <-startPlayerPingChannel:
 			context.PlayerPongChannel <- util.PlayerAddr{IpAddr: player.IpAddr.String(), IpPort: player.IpPort, ProxyPort: player.ProxyPort}

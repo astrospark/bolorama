@@ -38,6 +38,7 @@ var valid []string = []string{
 	"hostname",
 	"game_info_ping_seconds",
 	"player_timeout_seconds",
+	"tracker_debug_port",
 	"tracker_port",
 }
 
@@ -47,6 +48,7 @@ var defaults = map[string]string{
 	"enable_statistics":      "false",
 	"game_info_ping_seconds": "20",
 	"player_timeout_seconds": "60",
+	"tracker_debug_port":     "50001",
 	"tracker_port":           "50000",
 }
 
